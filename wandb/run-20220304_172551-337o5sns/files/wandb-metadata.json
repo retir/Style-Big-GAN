@@ -1,0 +1,30 @@
+{
+    "os": "Linux-5.4.144+-x86_64-with-Ubuntu-18.04-bionic",
+    "python": "3.7.12",
+    "heartbeatAt": "2022-03-04T17:26:02.918996",
+    "startedAt": "2022-03-04T17:25:51.247458",
+    "docker": null,
+    "gpu": "Tesla K80",
+    "gpu_count": 1,
+    "cpu_count": 2,
+    "cuda": null,
+    "args": [
+        "exp.config_dir=configs/",
+        "exp.config=dcgan_conf.yaml",
+        "exp.name=dcgan_classic",
+        "exp.pretrain=True",
+        "exp.pretrain_path=./logs/dcgan_classic"
+    ],
+    "state": "running",
+    "program": "starter.py",
+    "codePath": "starter.py",
+    "git": {
+        "remote": "https://github.com/w86763777/pytorch-gan-collections",
+        "commit": "860e90bd882eb5737103de55bcf0e977d6952343"
+    },
+    "email": null,
+    "root": "/content/drive/MyDrive/Collab_starter/pytorch-gan-collections",
+    "host": "5622b5365d5a",
+    "username": "root",
+    "executable": "/usr/bin/python3"
+}

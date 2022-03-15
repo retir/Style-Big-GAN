@@ -1,0 +1,38 @@
+
+Files already downloaded and verified
+/usr/local/lib/python3.7/dist-packages/torch/utils/data/dataloader.py:481: UserWarning: This DataLoader will create 4 worker processes in total. Our suggested max number of worker in current system is 2, which is smaller than what this DataLoader is going to create. Please be aware that excessive worker creation might get DataLoader running slow or even freeze, lower the worker number to avoid potential slowness/freeze if necessary.
+  cpuset_checked))
+Traceback (most recent call last):
+  File "starter.py", line 25, in <module>
+    main(config)
+  File "starter.py", line 10, in main
+    launcher(config)
+  File "/content/drive/MyDrive/Collab_starter/pytorch-gan-collections/launch.py", line 250, in launcher
+    train(config)
+  File "/content/drive/MyDrive/Collab_starter/pytorch-gan-collections/launch.py", line 139, in train
+    if not config.conf.pretrain:
+  File "/usr/local/lib/python3.7/dist-packages/omegaconf/dictconfig.py", line 357, in __getattr__
+    self._format_and_raise(key=key, value=None, cause=e)
+  File "/usr/local/lib/python3.7/dist-packages/omegaconf/base.py", line 196, in _format_and_raise
+    type_override=type_override,
+  File "/usr/local/lib/python3.7/dist-packages/omegaconf/_utils.py", line 741, in format_and_raise
+    _raise(ex, cause)
+  File "/usr/local/lib/python3.7/dist-packages/omegaconf/_utils.py", line 719, in _raise
+    raise ex.with_traceback(sys.exc_info()[2])  # set end OC_CAUSE=1 for full backtrace
+  File "/usr/local/lib/python3.7/dist-packages/omegaconf/dictconfig.py", line 351, in __getattr__
+    return self._get_impl(key=key, default_value=_DEFAULT_MARKER_)
+  File "/usr/local/lib/python3.7/dist-packages/omegaconf/dictconfig.py", line 438, in _get_impl
+    node = self._get_node(key=key, throw_on_missing_key=True)
+  File "/usr/local/lib/python3.7/dist-packages/omegaconf/dictconfig.py", line 465, in _get_node
+    self._validate_get(key)
+  File "/usr/local/lib/python3.7/dist-packages/omegaconf/dictconfig.py", line 167, in _validate_get
+    key=key, value=value, cause=ConfigAttributeError(msg)
+  File "/usr/local/lib/python3.7/dist-packages/omegaconf/base.py", line 196, in _format_and_raise
+    type_override=type_override,
+  File "/usr/local/lib/python3.7/dist-packages/omegaconf/_utils.py", line 821, in format_and_raise
+    _raise(ex, cause)
+  File "/usr/local/lib/python3.7/dist-packages/omegaconf/_utils.py", line 719, in _raise
+    raise ex.with_traceback(sys.exc_info()[2])  # set end OC_CAUSE=1 for full backtrace
+omegaconf.errors.ConfigAttributeError: Key 'conf' not in 'Args'
+    full_key: conf
+    object_type=Args

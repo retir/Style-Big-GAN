@@ -10,7 +10,7 @@ def generate_imgs(net_G, device, z_dim=128, size=5000, batch_size=128):
     imgs = []
     with torch.no_grad():
         for start in trange(0, size, batch_size,
-                            desc='Evaluating', ncols=0, leave=False):
+                            desc='Evaluating', leave=False):
             end = min(start + batch_size, size)
             z = torch.randn(end - start, z_dim).to(device)
             imgs.append(net_G(z).cpu())

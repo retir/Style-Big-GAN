@@ -1,0 +1,6 @@
+gen:
+    model: sngan
+
+model_params:
+    sngan:
+        arch: res_32_sngan

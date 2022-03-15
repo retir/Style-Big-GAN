@@ -1,0 +1,119 @@
+/usr/local/lib/python3.7/dist-packages/torch/utils/data/dataloader.py:481: UserWarning: This DataLoader will create 4 worker processes in total. Our suggested max number of worker in current system is 2, which is smaller than what this DataLoader is going to create. Please be aware that excessive worker creation might get DataLoader running slow or even freeze, lower the worker number to avoid potential slowness/freeze if necessary.
+  cpuset_checked))
+Files already downloaded and verified
+Training:   0% 0/50000 [00:15<?, ?it/s, loss=1.3863]
+
+
+
+
+
+Evaluating:  89% 349/391 [00:08<00:01, 41.08it/s]
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+get_inception_feature:  99% 49650/50000 [03:11<00:01, 258.56it/s]
+(1.0125943503828823, 9.796439863741703e-05)
+Training:   0% 0/50000 [03:54<?, ?it/s, loss=1.3863]
+Traceback (most recent call last):
+  File "starter.py", line 25, in <module>
+    main(config)
+  File "starter.py", line 10, in main
+    launcher(config)
+  File "/content/drive/MyDrive/Collab_starter/pytorch-gan-collections/launch.py", line 261, in launcher
+    train(config)
+  File "/content/drive/MyDrive/Collab_starter/pytorch-gan-collections/launch.py", line 243, in train
+    format_str = f'Step: {int(step)}, FID: {float(FID):.4f}, IS: {float(IS):.4f}\n'
+TypeError: float() argument must be a string or a number, not 'tuple'
