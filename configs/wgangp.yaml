@@ -1,0 +1,9 @@
+exp:
+    trainer: gan-collections
+gen:
+    model: wgangp
+    kimg: 50
+
+model_params:
+    wgangp:
+        total_steps: 50000

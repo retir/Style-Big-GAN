@@ -1,9 +1,10 @@
 import os
 import torch
 import arguments
-from launch import launcher
 import json
 from omegaconf import OmegaConf
+from trainers.gan_collections_trainer import gan_collections_launch
+from trainers.sg2trainer import sg2_launch
 
 def main(config):
     print('START MAIN')
@@ -12,14 +13,12 @@ def main(config):
 
 
 if __name__ == "__main__":
-    # limit CPU usage
-    os.environ["OMP_NUM_THREADS"] = "1"
-    os.environ["MKL_NUM_THREADS"] = "1"
-    os.environ["OPENBLAS_NUM_THREADS"] = "1"
-    os.environ["OPENMP_NUM_THREADS"] = "1"
-    torch.multiprocessing.set_start_method("spawn")
-
     config = arguments.load_config()
     print('CONFIG LOADED')
-    #print(type(OmegaConf.to_container(config)))
-    main(config)
+    
+    if config.exp.trainer == 'stylegan':
+        sg2_launch(config)
+    elif config.exp.trainer == 'gan-collections':
+        gan_collections_launch(config)
+    else:
+        raise ValueError('Wrong trainer')

@@ -1,2 +1,6 @@
+exp:
+    trainer: gan-collections
 gen:
+    kimg: 50
     model: dcgan
+    batch: 64
