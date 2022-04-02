@@ -1,5 +1,8 @@
+exp:
+    trainer: gan-collections
 gen:
     model: sngan
+    kimg: 50
 
 model_params:
     sngan:
