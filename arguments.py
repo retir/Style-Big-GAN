@@ -42,7 +42,7 @@ class LogArgs:
     sample_size: int = 64
     logdir: str = './logs'
     record: bool = True
-    fid_cache: str = './gan_collections/stats/cifar10.train.npz'
+    fid_cache: str = './stats/cifar10.train.npz'
 
 
 
@@ -53,7 +53,7 @@ class GenArgs:
     generate: bool = False
     pretrain: str = MISSING
     output: str = './outputs'
-    metrics: List[str] = field(default_factory=lambda: ['fid50k_full'])
+    metrics: List[str] = field(default_factory=lambda: ['fid50k_full', 'is50k'])
     gamma: float = -1
     kimg: int = -1
     batch: int = -1 # Поправить +
@@ -82,7 +82,6 @@ class TransferLearning:
     resume: str = 'noresume'
     freezed: int = -1
         
-
 ModelsArgs = models.models.make_dataclass_from_args("ModelsArgs")
 args.add_to_registry("model_params")(ModelsArgs)
 

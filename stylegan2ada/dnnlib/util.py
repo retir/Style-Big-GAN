@@ -241,7 +241,7 @@ def get_module_from_obj_name(obj_name: str) -> Tuple[types.ModuleType, str]:
             try:
                 module = importlib.import_module('stylegan2ada.' + module_name) # may raise ImportError
                 get_obj_from_module(module, local_obj_name) # may raise AttributeError
-                print(module_name, local_obj_name)
+                #print(module_name, local_obj_name)
                 return module, local_obj_name
             except:
                 pass
