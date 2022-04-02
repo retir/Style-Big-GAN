@@ -17,3 +17,6 @@ images
 
 # wandb
 wandb
+
+# style gan 2
+stylegan2ada/core
