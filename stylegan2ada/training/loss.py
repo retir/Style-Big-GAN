@@ -11,6 +11,7 @@ import torch
 from stylegan2ada.torch_utils import training_stats
 from stylegan2ada.torch_utils import misc
 from stylegan2ada.torch_utils.ops import conv2d_gradfix
+import wandb
 
 #----------------------------------------------------------------------------
 
@@ -34,6 +35,12 @@ class StyleGAN2Loss(Loss):
         self.pl_decay = pl_decay
         self.pl_weight = pl_weight
         self.pl_mean = torch.zeros([], device=device)
+        self.loss = None
+        
+    def backw(self):
+        if self.loss:
+            self.loss.backward()
+        self.loss = None
 
     def run_G(self, z, c, sync):
         with misc.ddp_sync(self.G_mapping, sync):
@@ -72,6 +79,15 @@ class StyleGAN2Loss(Loss):
                 training_stats.report('Loss/G/loss', loss_Gmain)
             with torch.autograd.profiler.record_function('Gmain_backward'):
                 loss_Gmain.mean().mul(gain).backward()
+#                 if self.loss is None:
+#                     self.loss = loss_Gmain.mean().mul(gain)
+#                 else:
+#                     self.loss += loss_Gmain.mean().mul(gain)
+                #losses['G loss'].append(self.loss.item())
+                #wandb.log({'G loss': self.loss}, step=step, commit=False)
+#         else:
+#             losses['G loss'].append(None)
+                
 
         # Gpl: Apply path length regularization.
         if do_Gpl:
@@ -90,6 +106,14 @@ class StyleGAN2Loss(Loss):
                 training_stats.report('Loss/G/reg', loss_Gpl)
             with torch.autograd.profiler.record_function('Gpl_backward'):
                 (gen_img[:, 0, 0, 0] * 0 + loss_Gpl).mean().mul(gain).backward()
+#                 if self.loss is None:
+#                     self.loss = (gen_img[:, 0, 0, 0] * 0 + loss_Gpl).mean().mul(gain)
+#                 else:
+#                     self.loss += (gen_img[:, 0, 0, 0] * 0 + loss_Gpl).mean().mul(gain)
+#                 loses['G loss reg'].append(self.loss.item())
+                #wandb.log({'G loss reg': self.loss}, step=step, commit=False)
+#         else:
+#             loses['G loss reg'].append(None)
 
         # Dmain: Minimize logits for generated images.
         loss_Dgen = 0
@@ -102,6 +126,14 @@ class StyleGAN2Loss(Loss):
                 loss_Dgen = torch.nn.functional.softplus(gen_logits) # -log(1 - sigmoid(gen_logits))
             with torch.autograd.profiler.record_function('Dgen_backward'):
                 loss_Dgen.mean().mul(gain).backward()
+#                 if self.loss is None:
+#                     self.loss = loss_Dgen.mean().mul(gain)
+#                 else:
+#                     self.loss += loss_Dgen.mean().mul(gain)
+#                 loses['D loss'].append(self.loss.item())
+                #wandb.log({'D loss': self.loss}, step=step, commit=False)
+#         else:
+#             loses['D loss'].append(None)
 
         # Dmain: Maximize logits for real images.
         # Dr1: Apply R1 regularization.
@@ -129,5 +161,13 @@ class StyleGAN2Loss(Loss):
 
             with torch.autograd.profiler.record_function(name + '_backward'):
                 (real_logits * 0 + loss_Dreal + loss_Dr1).mean().mul(gain).backward()
+#                 if self.loss is None:
+#                     self.loss = (real_logits * 0 + loss_Dreal + loss_Dr1).mean().mul(gain)
+#                 else:
+#                     self.loss += (real_logits * 0 + loss_Dreal + loss_Dr1).mean().mul(gain)
+                #wandb.log({'D loss reg': self.loss}, step=step, commit=False)
+#                 loses['D loss reg'].append(self.loss.item())
+#         else:
+#             loses['D loss reg'].append(None)
 
 #----------------------------------------------------------------------------

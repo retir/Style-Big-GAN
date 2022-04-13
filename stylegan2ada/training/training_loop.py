@@ -87,6 +87,8 @@ def save_image_grid(img, fname, drange, grid_size):
 #----------------------------------------------------------------------------
 
 def training_loop(
+    start_options           = {},
+    args                    = {},
     run_dir                 = '.',      # Output directory.
     training_set_kwargs     = {},       # Options for training set.
     data_loader_kwargs      = {},       # Options for torch.utils.data.DataLoader.
@@ -114,13 +116,19 @@ def training_loop(
     kimg_per_tick           = 4,        # Progress snapshot interval.
     image_snapshot_ticks    = 50,       # How often to save image snapshots? None = disable.
     network_snapshot_ticks  = 50,       # How often to save network snapshots? None = disable.
-    resume_pkl              = None,     # Network pickle to resume training from.
+    resume_params           = None,     # Network pickle to resume training from.
     cudnn_benchmark         = True,     # Enable torch.backends.cudnn.benchmark?
     allow_tf32              = False,    # Enable torch.backends.cuda.matmul.allow_tf32 and torch.backends.cudnn.allow_tf32?
     abort_fn                = None,     # Callback function for determining whether to abort training. Must return consistent results across ranks.
     progress_fn             = None,     # Callback function for updating training progress. Called for all ranks.
+    wandb_use               = True,
+    desc                    = '',
+    wandb_id                = '',
+    wandb_project           = '',
+    
 ):
     # Initialize.
+    wandb_step = start_options['wandb_step']
     start_time = time.time()
     device = torch.device('cuda', rank)
     np.random.seed(random_seed * num_gpus + rank)
@@ -153,9 +161,10 @@ def training_loop(
     G_ema = copy.deepcopy(G).eval()
 
     # Resume from existing pickle.
-    if (resume_pkl is not None) and (rank == 0):
-        print(f'Resuming from "{resume_pkl}"')
-        with dnnlib.util.open_url(resume_pkl) as f:
+    if (resume_params is not None) and (rank == 0):
+        model_path = os.path.join(resume_params.resume_dir, resume_params.resume_model)
+        print(f'Resuming from "{model_path}"')
+        with dnnlib.util.open_url(model_path) as f:
             resume_data = legacy.load_network_pkl(f)
         for name, module in [('G', G), ('D', D), ('G_ema', G_ema)]:
             misc.copy_params_and_buffers(resume_data[name], module, require_all=False)
@@ -222,6 +231,9 @@ def training_loop(
         print('Exporting sample images...')
         grid_size, images, labels = setup_snapshot_image_grid(training_set=training_set)
         save_image_grid(images, os.path.join(run_dir, 'reals.png'), drange=[0,255], grid_size=grid_size)
+        image = PIL.Image.open(os.path.join(run_dir, 'reals.png'))
+        if wandb_use:
+            wandb.log({"Real images": wandb.Image(image)}, step=wandb_step, commit=False)
         grid_z = torch.randn([labels.shape[0], G.z_dim], device=device).split(batch_gpu)
         grid_c = torch.from_numpy(labels).to(device).split(batch_gpu)
         images = torch.cat([G_ema(z=z, c=c, noise_mode='const').cpu() for z, c in zip(grid_z, grid_c)]).numpy()
@@ -246,14 +258,14 @@ def training_loop(
     if rank == 0:
         print(f'Training for {total_kimg} kimg...')
         print()
-    cur_nimg = 0
-    cur_tick = 0
+    cur_nimg = start_options['cur_nimg']
+    cur_tick = start_options['cur_tick']
     tick_start_nimg = cur_nimg
     tick_start_time = time.time()
     maintenance_time = tick_start_time - start_time
-    batch_idx = 0
+    batch_idx = start_options['batch_idx']
     if progress_fn is not None:
-        progress_fn(0, total_kimg)
+        progress_fn(cur_nimg, total_kimg)
     while True:
 
         # Fetch training data.
@@ -268,7 +280,8 @@ def training_loop(
             all_gen_c = [phase_gen_c.split(batch_gpu) for phase_gen_c in all_gen_c.split(batch_size)]
 
         # Execute training phases.
-        for phase, phase_gen_z, phase_gen_c in zip(phases, all_gen_z, all_gen_c):
+       # losses = defaultdict(list)
+        for phase_idx, (phase, phase_gen_z, phase_gen_c) in enumerate(zip(phases, all_gen_z, all_gen_c)):
             if batch_idx % phase.interval != 0:
                 continue
 
@@ -284,6 +297,7 @@ def training_loop(
                 gain = phase.interval
                 loss.accumulate_gradients(phase=phase.name, real_img=real_img, real_c=real_c, gen_z=gen_z, gen_c=gen_c, sync=sync, gain=gain)
 
+
             # Update weights.
             phase.module.requires_grad_(False)
             with torch.autograd.profiler.record_function(phase.name + '_opt'):
@@ -293,6 +307,7 @@ def training_loop(
                 phase.opt.step()
             if phase.end_event is not None:
                 phase.end_event.record(torch.cuda.current_stream(device))
+                    
 
         # Update G_ema.
         with torch.autograd.profiler.record_function('Gema'):
@@ -350,6 +365,10 @@ def training_loop(
         if (rank == 0) and (image_snapshot_ticks is not None) and (done or cur_tick % image_snapshot_ticks == 0):
             images = torch.cat([G_ema(z=z, c=c, noise_mode='const').cpu() for z, c in zip(grid_z, grid_c)]).numpy()
             save_image_grid(images, os.path.join(run_dir, f'fakes{cur_nimg//1000:06d}.png'), drange=[-1,1], grid_size=grid_size)
+            image = PIL.Image.open(os.path.join(run_dir, f'fakes{cur_nimg//1000:06d}.png'))
+            if wandb_use:
+                wandb.log({"Generated images": wandb.Image(image)}, step=wandb_step, commit=False)
+            
 
         # Save network snapshot.
         snapshot_pkl = None
@@ -367,6 +386,7 @@ def training_loop(
             if rank == 0:
                 with open(snapshot_pkl, 'wb') as f:
                     pickle.dump(snapshot_data, f)
+                    
 
         # Evaluate metrics.
         if (snapshot_data is not None) and (len(metrics) > 0):
@@ -375,10 +395,11 @@ def training_loop(
             for metric in metrics:
                 result_dict = metric_main.calc_metric(metric=metric, G=snapshot_data['G_ema'],
                     dataset_kwargs=training_set_kwargs, num_gpus=num_gpus, rank=rank, device=device)
-                if metric == 'fid50k_full':
-                    wandb.log({'FID': result_dict['results']['fid50k_full']})
-                if metric == 'is50k':
-                    wandb.log({'IS': result_dict['results']['is50k_mean']})
+                if wandb_use:
+                    if metric == 'fid50k_full':
+                        wandb.log({'FID': result_dict['results']['fid50k_full']}, step=wandb_step, commit=False)
+                    if metric == 'is50k':
+                        wandb.log({'IS': result_dict['results']['is50k_mean']},step=wandb_step, commit=False)
                 if rank == 0:
                     metric_main.report_metric(result_dict, run_dir=run_dir, snapshot_pkl=snapshot_pkl)
                 stats_metrics.update(result_dict.results)
@@ -393,8 +414,22 @@ def training_loop(
             training_stats.report0('Timing/' + phase.name, value)
         stats_collector.update()
         stats_dict = stats_collector.as_dict()
-
+        
+        
         # Update logs.
+        if wandb_use:
+            wandb.log({key: value['mean'] for key, value in stats_dict.items()}, step=wandb_step)
+        wandb_step += 1
+        
+        # Updating args
+        args.start_options['cur_nimg']= cur_nimg
+        args.start_options['cur_tick']= cur_tick
+        args.start_options['batch_idx'] = batch_idx
+        args.start_options['wandb_step'] = wandb_step
+        if rank == 0:
+            with open(os.path.join(args.run_dir, 'training_options.json'), 'wt') as f:
+                json.dump(args, f, indent=2)
+        
         timestamp = time.time()
         if stats_jsonl is not None:
             fields = dict(stats_dict, timestamp=timestamp)

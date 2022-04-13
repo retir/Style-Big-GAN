@@ -166,6 +166,7 @@ def copy_params_and_buffers(src_module, dst_module, require_all=False):
 @contextlib.contextmanager
 def ddp_sync(module, sync):
     assert isinstance(module, torch.nn.Module)
+    # print(f'Test 228: {not isinstance(module, torch.nn.parallel.DistributedDataParallel)}')
     if sync or not isinstance(module, torch.nn.parallel.DistributedDataParallel):
         yield
     else:
