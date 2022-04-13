@@ -21,6 +21,7 @@ class ExperimentArgs:
     base_cfg: str = 'auto'
     dry_run: bool = False
     trainer: str = 'stylegan'
+    wandb: bool = True
 
         
 @args.add_to_registry("data")
@@ -80,6 +81,9 @@ class Augmentations:
 @dataclass
 class TransferLearning:
     resume: str = 'noresume'
+    resume_dir: str = './logs'
+    args_name: str = 'training_options.json'
+    resume_model: str = ''
     freezed: int = -1
         
 ModelsArgs = models.models.make_dataclass_from_args("ModelsArgs")

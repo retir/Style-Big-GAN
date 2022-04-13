@@ -17,6 +17,7 @@ import tempfile
 import torch
 import stylegan2ada.dnnlib as dnnlib
 import wandb
+import json
 
 from stylegan2ada.training import training_loop
 from stylegan2ada.metrics import metric_main
@@ -35,7 +36,19 @@ import json
 from omegaconf import OmegaConf
 
 def setup_training_loop_kwargs(config):
+    if config.trans.resume == 'from_data':
+        with open(os.path.join(config.trans.resume_dir, config.trans.args_name)) as json_data:
+            args = dnnlib.EasyDict(json.load(json_data))
+        args.resume_params = dnnlib.EasyDict(config.trans)
+        desc = args.desc
+        return desc, args
+    
     args = dnnlib.EasyDict()
+    
+    args.start_options = dnnlib.EasyDict({'cur_nimg' : 0,
+        'cur_tick' : 0,
+        'batch_idx' : 0,
+         'wandb_step' : 0})
 
     # ------------------------------------------
     # General options: gpus, snap, metrics, seed
@@ -45,6 +58,8 @@ def setup_training_loop_kwargs(config):
     if not (config.gen.gpus >= 1 and config.gen.gpus & (config.gen.gpus - 1) == 0):
         raise UserError('--gpus must be a power of two')
     args.num_gpus = config.gen.gpus
+    
+    args.wandb_use = config.exp.wandb
 
 
     assert isinstance(config.data.snap, int)
@@ -163,6 +178,7 @@ def setup_training_loop_kwargs(config):
         desc += f'-batch{config.gen.batch}'
         args.batch_size = config.gen.batch
         args.batch_gpu = config.gen.batch // config.gen.gpus
+        args.batch_gpu = 64
 
     # ---------------------------------------------------
     # Discriminator augmentation: aug, p, target, augpipe
@@ -274,6 +290,8 @@ def setup_training_loop_kwargs(config):
 
     if config.gen.workers >= 1:
         args.data_loader_kwargs.num_workers = config.gen.workers
+        
+    args.desc = desc
 
     return desc, args
 
@@ -282,8 +300,15 @@ def setup_training_loop_kwargs(config):
 def subprocess_fn(rank, args, temp_dir, config):
     dnnlib.util.Logger(file_name=os.path.join(args.run_dir, 'log.txt'), file_mode='a', should_flush=True)
     
-    wandb.init(project=config.exp.project, entity="retir", name=config.exp.name)
-    wandb.config = config
+    if args.wandb_use:
+        if config.trans.resume == 'noresume':
+            wandb_id = wandb.util.generate_id()
+            args.wandb_id = wandb_id
+            args.wandb_project = config.exp.project
+            wandb.init(id=wandb_id, resume='allow', project=config.exp.project, entity="retir", name=config.exp.name)
+            wandb.config = args
+        else:
+            wandb.init(id=args.wandb_id, resume=True, project=args.wandb_project, entity="retir")
 
     # Init torch.distributed.
     if args.num_gpus > 1:
@@ -302,7 +327,7 @@ def subprocess_fn(rank, args, temp_dir, config):
         custom_ops.verbosity = 'none' #  COMMENT
 
     # Execute training loop.
-    training_loop.training_loop(rank=rank, **args) # LOOOOP
+    training_loop.training_loop(rank=rank, args=args, **args) # LOOOOP
 
 #----------------------------------------------------------------------------
 
@@ -331,14 +356,15 @@ def sg2_launch(config):
         raise err
 
     # Pick output directory.
-    prev_run_dirs = []
-    if os.path.isdir(config.gen.output): # outdir
-        prev_run_dirs = [x for x in os.listdir(config.gen.output) if os.path.isdir(os.path.join(config.gen.output, x))]
-    prev_run_ids = [re.match(r'^\d+', x) for x in prev_run_dirs]
-    prev_run_ids = [int(x.group()) for x in prev_run_ids if x is not None]
-    cur_run_id = max(prev_run_ids, default=-1) + 1
-    args.run_dir = os.path.join(config.gen.output, f'{cur_run_id:05d}-{run_desc}')
-    assert not os.path.exists(args.run_dir)
+    if config.trans.resume != 'from_data':
+        prev_run_dirs = []
+        if os.path.isdir(config.gen.output): # outdir
+            prev_run_dirs = [x for x in os.listdir(config.gen.output) if os.path.isdir(os.path.join(config.gen.output, x))]
+        prev_run_ids = [re.match(r'^\d+', x) for x in prev_run_dirs]
+        prev_run_ids = [int(x.group()) for x in prev_run_ids if x is not None]
+        cur_run_id = max(prev_run_ids, default=-1) + 1
+        args.run_dir = os.path.join(config.gen.output, f'{cur_run_id:05d}-{run_desc}')
+        assert not os.path.exists(args.run_dir)
 
     # Print options.
     print()
@@ -346,13 +372,13 @@ def sg2_launch(config):
     print(json.dumps(args, indent=2))
     print()
     print(f'Output directory:   {args.run_dir}')
-    print(f'Training data:      {args.training_set_kwargs.path}')
+    print(f'Training data:      {args.training_set_kwargs["path"]}')
     print(f'Training duration:  {args.total_kimg} kimg')
     print(f'Number of GPUs:     {args.num_gpus}')
-    print(f'Number of images:   {args.training_set_kwargs.max_size}')
-    print(f'Image resolution:   {args.training_set_kwargs.resolution}')
-    print(f'Conditional model:  {args.training_set_kwargs.use_labels}')
-    print(f'Dataset x-flips:    {args.training_set_kwargs.xflip}')
+    print(f'Number of images:   {args.training_set_kwargs["max_size"]}')
+    print(f'Image resolution:   {args.training_set_kwargs["resolution"]}')
+    print(f'Conditional model:  {args.training_set_kwargs["use_labels"]}')
+    print(f'Dataset x-flips:    {args.training_set_kwargs["xflip"]}')
     print()
 
     # Dry run?
@@ -361,10 +387,11 @@ def sg2_launch(config):
         return
 
     # Create output directory.
-    print('Creating output directory...')
-    os.makedirs(args.run_dir)
-    with open(os.path.join(args.run_dir, 'training_options.json'), 'wt') as f:
-        json.dump(args, f, indent=2)
+    if config.trans.resume != 'from_data':
+        print('Creating output directory...')
+        os.makedirs(args.run_dir)
+        with open(os.path.join(args.run_dir, 'training_options.json'), 'wt') as f:
+            json.dump(args, f, indent=2)
     
     # Launch processes.
     print('Launching processes...')

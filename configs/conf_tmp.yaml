@@ -1,0 +1,12 @@
+gen:
+    output: /home/jupyter/work/resources/Style-Big-GAN/logs
+    gpus: 1
+data:
+    dataset_path: /home/jupyter/work/resources/Style-Big-GAN/data/cifar10.zip
+gens_args:
+    sg2_classic:
+        z_dim: 512
+datasets_args:
+    image_folder:
+        use_labels: True
+        

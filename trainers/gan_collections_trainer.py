@@ -80,6 +80,7 @@ def train(config):
     wandb.init(project=config.exp.project, entity="retir", name=config.exp.name)
     wandb.config = config
     model_config = config.model_params[config.gen.model]
+    
     if config.data.dataset == 'cifar10':
         dataset = datasets.CIFAR10(
             config.data.dataset_path, train=True, download=True,
@@ -148,6 +149,7 @@ def train(config):
     pbar = Logger(model_config.total_steps + 1, start_step)
     #with Logger(model_config.total_steps + 1, start_step) as pbar:
     for step in pbar:
+        
         # Discriminator
         for _ in range(model_config.n_dis):
             with torch.no_grad():
