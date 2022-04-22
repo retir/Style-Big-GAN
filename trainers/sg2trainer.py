@@ -178,7 +178,7 @@ def setup_training_loop_kwargs(config):
         desc += f'-batch{config.gen.batch}'
         args.batch_size = config.gen.batch
         args.batch_gpu = config.gen.batch // config.gen.gpus
-        args.batch_gpu = 64
+        args.batch_gpu = 32
 
     # ---------------------------------------------------
     # Discriminator augmentation: aug, p, target, augpipe

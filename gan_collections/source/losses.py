@@ -1,8 +1,12 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import utils
+
+losses = utils.ClassRegistry()
 
 
+@losses.add_to_registry("bce")
 class BCEWithLogits(nn.BCEWithLogitsLoss):
     def forward(self, pred_real, pred_fake=None):
         if pred_fake is not None:
@@ -14,6 +18,7 @@ class BCEWithLogits(nn.BCEWithLogitsLoss):
             return loss
 
 
+@losses.add_to_registry("hinge")        
 class Hinge(nn.Module):
     def forward(self, pred_real, pred_fake=None):
         if pred_fake is not None:
@@ -25,6 +30,7 @@ class Hinge(nn.Module):
             return loss
 
 
+@losses.add_to_registry("wasserstein")        
 class Wasserstein(nn.Module):
     def forward(self, pred_real, pred_fake=None):
         if pred_fake is not None:
@@ -37,6 +43,7 @@ class Wasserstein(nn.Module):
             return loss
 
 
+@losses.add_to_registry("softplus")        
 class Softplus(nn.Module):
     def forward(self, pred_real, pred_fake=None): # поменять местами real и fake
         if pred_fake is not None:

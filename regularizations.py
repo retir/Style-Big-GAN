@@ -1,5 +1,7 @@
 import utils
+import torch
 from stylegan2ada.torch_utils.ops import conv2d_gradfix
+from stylegan2ada.torch_utils import training_stats
 
 generator_regs = utils.ClassRegistry()
 discriminator_regs = utils.ClassRegistry()
@@ -40,15 +42,45 @@ class R1reg:
         self.device = device
         self.r1_gamma = r1_gamma
         
-        def calc_reg(self, model, real_img, real_c, gen_z, gen_c, real_logits, real_img_tmp, sync, gain):
-            if self.r1_gamma != 0:
-                with torch.autograd.profiler.record_function('Dr1_forward'):
-                    with torch.autograd.profiler.record_function('r1_grads'), conv2d_gradfix.no_weight_gradients():
-                        r1_grads = torch.autograd.grad(outputs=[real_logits.sum()], inputs=[real_img_tmp], create_graph=True, only_inputs=True)[0]
-                    r1_penalty = r1_grads.square().sum([1,2,3])
-                    loss_Dr1 = r1_penalty * (self.r1_gamma / 2)
-                    training_stats.report('Loss/r1_penalty', r1_penalty)
-                    training_stats.report('Loss/D/r1reg', loss_Dr1)
+    def calc_reg(self, model, real_img, real_c, gen_z, gen_c, real_logits, real_img_tmp, sync, gain):
+        if self.r1_gamma != 0:
+            with torch.autograd.profiler.record_function('Dr1_forward'):
+                with torch.autograd.profiler.record_function('r1_grads'), conv2d_gradfix.no_weight_gradients():
+                    r1_grads = torch.autograd.grad(outputs=[real_logits.sum()], inputs=[real_img_tmp], create_graph=True, only_inputs=True)[0]
+                r1_penalty = r1_grads.square().sum([1,2,3])
+                loss_Dr1 = r1_penalty * (self.r1_gamma / 2)
+                training_stats.report('Loss/r1_penalty', r1_penalty)
+                training_stats.report('Loss/D/r1reg', loss_Dr1)
 
-                with torch.autograd.profiler.record_function('Dr1_backward'):
-                    (real_logits * 0 + loss_Dr1).mean().mul(gain).backward()
+            with torch.autograd.profiler.record_function('Dr1_backward'):
+                (real_logits * 0 + loss_Dr1).mean().mul(gain).backward()
+                
+                
+@discriminator_regs.add_to_registry("grad_pen")
+class Grad_pen:
+    def __init__(self, device, alpha):
+        self.device = device
+        self.alpha = alpha
+    def calc_reg(self, model, real_img, real_c, gen_z, gen_c, real_logits, real_img_tmp, sync, gain):
+        with torch.autograd.profiler.record_function('Dgrad_pen_forward'):
+            real = real_img.to(self.device)
+            with torch.no_grad():
+                fake = model.run_G(gen_z, gen_c, sync=False)
+            t = torch.rand(real.size(0), 1, 1, 1).to(real.device)
+            t = t.expand(real.size())
+
+            interpolates = t * real + (1 - t) * fake
+            interpolates.requires_grad_(True)
+            disc_interpolates = model.run_D(interpolates, gen_c, sync=sync)
+            grad = torch.autograd.grad(
+                outputs=disc_interpolates, inputs=interpolates,
+                grad_outputs=torch.ones_like(disc_interpolates),
+                create_graph=True, retain_graph=True)[0]
+
+            grad_norm = torch.norm(torch.flatten(grad, start_dim=1), dim=1)
+            loss_gp = self.alpha * (grad_norm - 1) ** 2
+            
+            training_stats.report('Loss/D/grad_pen', loss_gp)
+
+        with torch.autograd.profiler.record_function('Dgrad_pen_backward'):
+            loss_gp.mean().mul(gain).backward()

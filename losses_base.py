@@ -11,9 +11,11 @@ import torch
 from stylegan2ada.torch_utils import training_stats
 from stylegan2ada.torch_utils import misc
 from stylegan2ada.torch_utils.ops import conv2d_gradfix
+import stylegan2ada.dnnlib as dnnlib
 import utils
 from regularizations import generator_regs
 from regularizations import discriminator_regs
+from losses import losses
 
 losses_arch = utils.ClassRegistry()
 
@@ -199,14 +201,15 @@ class LossBase:
         return real_logits, real_img_tmp
         
     def accumulate_gradients(self, phase, real_img, real_c, gen_z, gen_c, sync, gain):
+       # print('ACCUMULATE')
         assert phase in ['Gmain', 'Greg', 'Gboth', 'Dmain', 'Dreg', 'Dboth']
         do_Gmain = (phase in ['Gmain', 'Gboth'])
         do_Dmain = (phase in ['Dmain', 'Dboth'])
-        do_Greg  = (phase in ['Greg', 'Gboth']) and self.gen_regs 
-        do_Dreg  = (phase in ['Dreg', 'Dboth']) and self.dis_regs
+        do_Greg  = (phase in ['Greg', 'Gboth']) and self.gen_regs is not None
+        do_Dreg  = (phase in ['Dreg', 'Dboth']) and self.dis_regs is not None
         
         if do_Gmain:
-            self.do_Gmain(real_img, real_c, gen_z, gen_c, sync=(sync and not do_Gpl), gain=gain)
+            self.do_Gmain(real_img, real_c, gen_z, gen_c, sync=(sync and not do_Greg), gain=gain)
         if do_Greg:
             for i, reg in enumerate(self.gen_regs):
                 reg.calc_reg(self, real_img, real_c, gen_z, gen_c, sync=(i==len(self.gen_regs) - 1), gain=gain)
@@ -214,20 +217,31 @@ class LossBase:
         real_logits = None
         real_img_tmp = None
         if do_Dmain:
-            real_logits, real_img_tmp = self.do_Dmain(real_img, real_c, gen_z, gen_c, sync=(sync and not do_Dpl), gain=gain)
+           # print('DO_GMAIN')
+            real_logits, real_img_tmp = self.do_Dmain(real_img, real_c, gen_z, gen_c, sync=(sync and not do_Dreg), gain=gain)
+            #print(real_logits is None)
         
         if do_Dreg:
+            #print(do_Dreg)
+            #print('DO_GREG')
+            #print(real_logits is None)
+            if not do_Dmain:
+                with torch.autograd.profiler.record_function('Dreg_forward'):
+                    real_img_tmp = real_img.detach().requires_grad_(do_Dreg)
+                    real_logits = self.run_D(real_img_tmp, real_c, sync=sync)
+                    training_stats.report('Loss/scores/real', real_logits)
+                    training_stats.report('Loss/signs/real', real_logits.sign())
             for i, reg in enumerate(self.dis_regs):
-                reg.calc_grad(self, real_img, real_c, gen_z, gen_c, real_logits, real_img_tmp, sync=(i==len(self.dis_regs) - 1), gain=gain)
+                reg.calc_reg(self, real_img, real_c, gen_z, gen_c, real_logits, real_img_tmp, sync=(i==len(self.dis_regs) - 1), gain=gain)
 
                 
                 
 @losses_arch.add_to_registry("sg2")
 class SG2Loss(LossBase):
-    def __init__(self, device, gen_regs, dis_regs, G, D, loss, augment_pipe=None, style_mixing_prob=0.9):
-        super().__init__(device, gen_regs, dis_regs, G, D, loss, augment_pipe)
+    def __init__(self, device, gen_regs, dis_regs, G_mapping, G_synthesis, D, loss, augment_pipe=None, style_mixing_prob=0.9):
+        self.G = dnnlib.EasyDict({'G_mapping': G_mapping, 'G_synthesis' : G_synthesis})
+        super().__init__(device, gen_regs, dis_regs, self.G, D, loss, augment_pipe)
         self.device = device
-        self.G = G
         self.D = D
         self.augment_pipe = augment_pipe
         self.gen_regs = [generator_regs[reg](device, **args) for reg, args in gen_regs] if len(gen_regs) > 0 else None

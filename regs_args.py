@@ -18,6 +18,12 @@ class PPL_args:
 @disc_regs_args.add_to_registry("r1")
 @dataclass
 class R1_args:
-    r1_gamma: float = 1 # spec
+    r1_gamma: float = 1. # spec
+        
+        
+@disc_regs_args.add_to_registry("grad_pen")
+@dataclass
+class GradPen_args:
+    alpha: float = 10. # spec
 
     

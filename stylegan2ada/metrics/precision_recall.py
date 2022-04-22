@@ -33,16 +33,16 @@ def compute_distances(row_features, col_features, num_gpus, rank, col_batch_size
 
 #----------------------------------------------------------------------------
 
-def compute_pr(opts, max_real, num_gen, nhood_size, row_batch_size, col_batch_size):
+def compute_pr(opts, max_real, num_gen, nhood_size, row_batch_size, col_batch_size, dataset_name='image_folder'):
     detector_url = 'https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/metrics/vgg16.pt'
     detector_kwargs = dict(return_features=True)
 
     real_features = metric_utils.compute_feature_stats_for_dataset(
-        opts=opts, detector_url=detector_url, detector_kwargs=detector_kwargs,
+        opts=opts, datasetname=dataset_name, detector_url=detector_url, detector_kwargs=detector_kwargs,
         rel_lo=0, rel_hi=0, capture_all=True, max_items=max_real).get_all_torch().to(torch.float16).to(opts.device)
 
     gen_features = metric_utils.compute_feature_stats_for_generator(
-        opts=opts, detector_url=detector_url, detector_kwargs=detector_kwargs,
+        opts=opts, dataset_name=dataset_name, detector_url=detector_url, detector_kwargs=detector_kwargs,
         rel_lo=0, rel_hi=1, capture_all=True, max_items=num_gen).get_all_torch().to(torch.float16).to(opts.device)
 
     results = dict()

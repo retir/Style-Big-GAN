@@ -3,6 +3,7 @@ exp:
 gen:
     model: wgangp
     kimg: 50
+    batch: 64
 
 model_params:
     wgangp:

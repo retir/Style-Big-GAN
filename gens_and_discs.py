@@ -12,6 +12,8 @@ import torch.nn.init as init
 from torch.nn.utils.spectral_norm import spectral_norm
 import math
 import utils
+import functools
+import layers
 from stylegan2ada.torch_utils import misc
 from stylegan2ada.torch_utils import persistence
 from stylegan2ada.torch_utils.ops import conv2d_resample
@@ -482,7 +484,7 @@ class SynthesisNetwork(torch.nn.Module):
 
 #----------------------------------------------------------------------------
 
-@generators.add_to_registry("sg2classic")
+@generators.add_to_registry("sg2_classic")
 @persistence.persistent_class
 class Generator(torch.nn.Module):
     def __init__(self,
@@ -679,7 +681,7 @@ class DiscriminatorEpilogue(torch.nn.Module):
 
 #----------------------------------------------------------------------------
 
-@discriminators.add_to_registry("sg2classic")
+@discriminators.add_to_registry("sg2_classic")
 @persistence.persistent_class
 class Discriminator(torch.nn.Module):
     def __init__(self,
@@ -762,14 +764,16 @@ class Generator_dcgan(torch.nn.Module):
             torch.nn.Tanh()
         )
 
-    def forward(self, z):
+    def forward(self, z, c, noise_mode=None):
         return self.main(z.view(-1, self.z_dim, 1, 1))
 
 
 @generators.add_to_registry("cnn32_dcgan")
 class Generator32_dcgan(Generator_dcgan):
-    def __init__(self, z_dim):
+    def __init__(self, z_dim, c_dim, img_resolution, *args, **kwargs):
         super().__init__(z_dim, M=2)
+        self.c_dim = c_dim
+        self.img_resolution = img_resolution
 
 
 @generators.add_to_registry("cnn48_dcgan")
@@ -804,7 +808,7 @@ class Discriminator_dcgan(torch.nn.Module):
 
         self.linear = torch.nn.Linear(M // 16 * M // 16 * 512, 1)
 
-    def forward(self, x):
+    def forward(self, x, c):
         x = self.main(x)
         x = torch.flatten(x, start_dim=1)
         x = self.linear(x)
@@ -813,7 +817,7 @@ class Discriminator_dcgan(torch.nn.Module):
 
 @discriminators.add_to_registry("cnn32_dcgan")
 class Discriminator32_dcgan(Discriminator_dcgan):
-    def __init__(self):
+    def __init__(self, *args, **kwargs):
         super().__init__(M=32)
         
         
@@ -821,3 +825,664 @@ class Discriminator32_dcgan(Discriminator_dcgan):
 class Discriminator48_dcgan(Discriminator_dcgan):
     def __init__(self):
         super().__init__(M=48)
+        
+        
+        
+# SNGAN
+
+
+class ResGenBlock(torch.nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.residual = torch.nn.Sequential(
+            torch.nn.BatchNorm2d(in_channels),
+            torch.nn.ReLU(),
+            torch.nn.Upsample(scale_factor=2),
+            torch.nn.Conv2d(in_channels, out_channels, 3, stride=1, padding=1),
+            torch.nn.BatchNorm2d(out_channels),
+            torch.nn.ReLU(),
+            torch.nn.Conv2d(out_channels, out_channels, 3, stride=1, padding=1),
+        )
+        self.shortcut = torch.nn.Sequential(
+            torch.nn.Upsample(scale_factor=2),
+            torch.nn.Conv2d(in_channels, out_channels, 1, stride=1, padding=0)
+        )
+        self.initialize()
+
+    def initialize(self):
+        for m in self.residual.modules():
+            if isinstance(m, torch.nn.Conv2d):
+                init.xavier_uniform_(m.weight, math.sqrt(2))
+                init.zeros_(m.bias)
+        for m in self.shortcut.modules():
+            if isinstance(m, torch.nn.Conv2d):
+                init.xavier_uniform_(m.weight)
+                init.zeros_(m.bias)
+
+    def forward(self, x):
+        return self.residual(x) + self.shortcut(x)
+
+
+@generators.add_to_registry("res32_sngan")
+class ResGenerator32(torch.nn.Module):
+    def __init__(self, z_dim, c_dim, img_resolution, *args, **kwargs):
+        super().__init__()
+        self.z_dim = z_dim
+        self.c_dim = c_dim
+        self.img_resolution = img_resolution
+        self.linear = torch.nn.Linear(z_dim, 4 * 4 * 256)
+
+        self.blocks = torch.nn.Sequential(
+            ResGenBlock(256, 256),
+            ResGenBlock(256, 256),
+            ResGenBlock(256, 256),
+        )
+        self.output = torch.nn.Sequential(
+            torch.nn.BatchNorm2d(256),
+            torch.nn.ReLU(True),
+            torch.nn.Conv2d(256, 3, 3, stride=1, padding=1),
+            torch.nn.Tanh(),
+        )
+        self.initialize()
+
+    def initialize(self):
+        init.xavier_uniform_(self.linear.weight)
+        init.zeros_(self.linear.bias)
+        for m in self.output.modules():
+            if isinstance(m, torch.nn.Conv2d):
+                init.xavier_uniform_(m.weight)
+                init.zeros_(m.bias)
+
+    def forward(self, z, c, noise_mode='random'):
+        z = self.linear(z)
+        z = z.view(-1, 256, 4, 4)
+        return self.output(self.blocks(z))
+    
+    
+
+class OptimizedResDisblock_sngan(torch.nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.shortcut = torch.nn.Sequential(
+            torch.nn.AvgPool2d(2),
+            torch.nn.Conv2d(in_channels, out_channels, 1, 1, 0))
+        self.residual = torch.nn.Sequential(
+            torch.nn.Conv2d(in_channels, out_channels, 3, 1, 1),
+            torch.nn.ReLU(),
+            torch.nn.Conv2d(out_channels, out_channels, 3, 1, 1),
+            torch.nn.AvgPool2d(2))
+        self.initialize()
+
+    def initialize(self):
+        for m in self.residual.modules():
+            if isinstance(m, torch.nn.Conv2d):
+                init.xavier_uniform_(m.weight, math.sqrt(2))
+                init.zeros_(m.bias)
+                spectral_norm(m)
+        for m in self.shortcut.modules():
+            if isinstance(m, torch.nn.Conv2d):
+                init.xavier_uniform_(m.weight)
+                init.zeros_(m.bias)
+                spectral_norm(m)
+
+    def forward(self, x):
+        return self.residual(x) + self.shortcut(x)
+
+
+class ResDisBlock_sngan(torch.nn.Module):
+    def __init__(self, in_channels, out_channels, down=False):
+        super().__init__()
+        shortcut = []
+        if in_channels != out_channels or down:
+            shortcut.append(
+                torch.nn.Conv2d(in_channels, out_channels, 1, 1, 0))
+        if down:
+            shortcut.append(torch.nn.AvgPool2d(2))
+        self.shortcut = torch.nn.Sequential(*shortcut)
+
+        residual = [
+            torch.nn.ReLU(),
+            torch.nn.Conv2d(in_channels, out_channels, 3, 1, 1),
+            torch.nn.ReLU(),
+            torch.nn.Conv2d(out_channels, out_channels, 3, 1, 1),
+        ]
+        if down:
+            residual.append(torch.nn.AvgPool2d(2))
+        self.residual = torch.nn.Sequential(*residual)
+        self.initialize()
+
+    def initialize(self):
+        for m in self.residual.modules():
+            if isinstance(m, torch.nn.Conv2d):
+                init.xavier_uniform_(m.weight, math.sqrt(2))
+                init.zeros_(m.bias)
+                spectral_norm(m)
+        for m in self.shortcut.modules():
+            if isinstance(m, torch.nn.Conv2d):
+                init.xavier_uniform_(m.weight)
+                init.zeros_(m.bias)
+                spectral_norm(m)
+
+    def forward(self, x):
+        return (self.residual(x) + self.shortcut(x))
+
+
+@discriminators.add_to_registry("res32_sngan")
+class ResDiscriminator32(torch.nn.Module):
+    def __init__(self, z_dim, c_dim, img_resolution, *args, **kwargs):
+        super().__init__()
+        self.c_dim = c_dim
+        self.img_resolution = img_resolution
+        self.model = torch.nn.Sequential(
+            OptimizedResDisblock_sngan(3, 128),
+            ResDisBlock_sngan(128, 128, down=True),
+            ResDisBlock_sngan(128, 128),
+            ResDisBlock_sngan(128, 128),
+            torch.nn.ReLU())
+        self.linear = torch.nn.Linear(128, 1, bias=False)
+        self.initialize()
+
+    def initialize(self):
+        init.xavier_uniform_(self.linear.weight)
+        spectral_norm(self.linear)
+
+    def forward(self, x, c):
+        x = self.model(x).sum(dim=[2, 3])
+        x = self.linear(x)
+        return x
+
+# WGAN GP    
+# ----------------------------------------------
+
+@generators.add_to_registry("res32_wgan")
+class ResGenerator32(torch.nn.Module):
+    def __init__(self, z_dim, c_dim, img_resolution, *args, **kwargs):
+        super().__init__()
+        self.z_dim = z_dim
+        self.c_dim = c_dim
+        self.img_resolution = img_resolution
+        self.linear = torch.nn.Linear(z_dim, 4 * 4 * 256)
+
+        self.blocks = torch.nn.Sequential(
+            ResGenBlock(256, 256),
+            ResGenBlock(256, 256),
+            ResGenBlock(256, 256),
+        )
+        self.output = torch.nn.Sequential(
+            torch.nn.BatchNorm2d(256),
+            torch.nn.ReLU(True),
+            torch.nn.Conv2d(256, 3, 3, stride=1, padding=1),
+            torch.nn.Tanh(),
+        )
+        self.initialize()
+
+    def initialize(self):
+        init.xavier_uniform_(self.linear.weight)
+        init.zeros_(self.linear.bias)
+        for m in self.output.modules():
+            if isinstance(m, torch.nn.Conv2d):
+                init.xavier_uniform_(m.weight)
+                init.zeros_(m.bias)
+
+    def forward(self, z, c, noise_mode='random'):
+        z = self.linear(z)
+        z = z.view(-1, 256, 4, 4)
+        return self.output(self.blocks(z))
+    
+    
+class OptimizedResDisblock_wgan(torch.nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.shortcut = torch.nn.Sequential(
+            torch.nn.AvgPool2d(2),
+            torch.nn.Conv2d(in_channels, out_channels, 1, 1, 0))
+        self.residual = torch.nn.Sequential(
+            torch.nn.Conv2d(in_channels, out_channels, 3, 1, 1),
+            torch.nn.ReLU(),
+            torch.nn.Conv2d(out_channels, out_channels, 3, 1, 1),
+            torch.nn.AvgPool2d(2))
+        self.initialize()
+
+    def initialize(self):
+        for m in self.residual.modules():
+            if isinstance(m, torch.nn.Conv2d):
+                init.xavier_uniform_(m.weight, math.sqrt(2))
+                init.zeros_(m.bias)
+        for m in self.shortcut.modules():
+            if isinstance(m, torch.nn.Conv2d):
+                init.xavier_uniform_(m.weight)
+                init.zeros_(m.bias)
+
+    def forward(self, x):
+        return self.residual(x) + self.shortcut(x)
+
+
+class ResDisBlock_wgan(torch.nn.Module):
+    def __init__(self, in_channels, out_channels, down=False):
+        super().__init__()
+        shortcut = []
+        if in_channels != out_channels or down:
+            shortcut.append(
+                torch.nn.Conv2d(in_channels, out_channels, 1, 1, 0))
+        if down:
+            shortcut.append(torch.nn.AvgPool2d(2))
+        self.shortcut = torch.nn.Sequential(*shortcut)
+
+        residual = [
+            torch.nn.ReLU(),
+            torch.nn.Conv2d(in_channels, out_channels, 3, 1, 1),
+            torch.nn.ReLU(),
+            torch.nn.Conv2d(out_channels, out_channels, 3, 1, 1),
+        ]
+        if down:
+            residual.append(torch.nn.AvgPool2d(2))
+        self.residual = torch.nn.Sequential(*residual)
+        self.initialize()
+
+    def initialize(self):
+        for m in self.residual.modules():
+            if isinstance(m, torch.nn.Conv2d):
+                init.xavier_uniform_(m.weight, math.sqrt(2))
+                init.zeros_(m.bias)
+        for m in self.shortcut.modules():
+            if isinstance(m, torch.nn.Conv2d):
+                init.xavier_uniform_(m.weight)
+                init.zeros_(m.bias)
+
+    def forward(self, x):
+        return (self.residual(x) + self.shortcut(x))
+
+
+@discriminators.add_to_registry("res32_wgan")
+class ResDiscriminator32_wgan(torch.nn.Module):
+    def __init__(self, z_dim, c_dim, img_resolution, *args, **kwargs):
+        super().__init__()
+        self.c_dim = c_dim
+        self.img_resolution = img_resolution
+        self.model = torch.nn.Sequential(
+            OptimizedResDisblock_wgan(3, 128),
+            ResDisBlock_wgan(128, 128, down=True),
+            ResDisBlock_wgan(128, 128),
+            ResDisBlock_wgan(128, 128),
+            torch.nn.ReLU())
+        self.linear = torch.nn.Linear(128, 1)
+        self.initialize()
+
+    def initialize(self):
+        init.xavier_uniform_(self.linear.weight)
+
+    def forward(self, x, c):
+        x = self.model(x).sum(dim=[2, 3])
+        x = self.linear(x)
+        return x
+    
+    
+#-----------------------------------------------------------------------------------
+# BIG GAN
+
+
+def G_arch(ch=64, attention='64', ksize='333333', dilation='111111'):
+    arch = {}
+    arch[512] = {'in_channels' :  [ch * item for item in [16, 16, 8, 8, 4, 2, 1]],
+               'out_channels' : [ch * item for item in [16,  8, 8, 4, 2, 1, 1]],
+               'upsample' : [True] * 7,
+               'resolution' : [8, 16, 32, 64, 128, 256, 512],
+               'attention' : {2**i: (2**i in [int(item) for item in attention.split('_')])
+                              for i in range(3,10)}}
+    arch[256] = {'in_channels' :  [ch * item for item in [16, 16, 8, 8, 4, 2]],
+               'out_channels' : [ch * item for item in [16,  8, 8, 4, 2, 1]],
+               'upsample' : [True] * 6,
+               'resolution' : [8, 16, 32, 64, 128, 256],
+               'attention' : {2**i: (2**i in [int(item) for item in attention.split('_')])
+                              for i in range(3,9)}}
+    arch[128] = {'in_channels' :  [ch * item for item in [16, 16, 8, 4, 2]],
+               'out_channels' : [ch * item for item in [16, 8, 4, 2, 1]],
+               'upsample' : [True] * 5,
+               'resolution' : [8, 16, 32, 64, 128],
+               'attention' : {2**i: (2**i in [int(item) for item in attention.split('_')])
+                              for i in range(3,8)}}
+    arch[64]  = {'in_channels' :  [ch * item for item in [16, 16, 8, 4]],
+               'out_channels' : [ch * item for item in [16, 8, 4, 2]],
+               'upsample' : [True] * 4,
+               'resolution' : [8, 16, 32, 64],
+               'attention' : {2**i: (2**i in [int(item) for item in attention.split('_')])
+                              for i in range(3,7)}}
+    arch[32]  = {'in_channels' :  [ch * item for item in [4, 4, 4]],
+               'out_channels' : [ch * item for item in [4, 4, 4]],
+               'upsample' : [True] * 3,
+               'resolution' : [8, 16, 32],
+               'attention' : {2**i: (2**i in [int(item) for item in attention.split('_')])
+                              for i in range(3,6)}}
+
+    return arch
+
+
+@generators.add_to_registry("big_gan")
+class BigGAnGenerator(torch.nn.Module):
+    def __init__(self, G_ch=64, z_dim=128, c_dim=10, bottom_width=4, img_resolution=128,
+               G_kernel_size=3, G_attn='64', n_classes=10,
+               num_G_SVs=1, num_G_SV_itrs=1,
+               G_shared=True, shared_dim=0, hier=False,
+               cross_replica=False, mybn=False,
+               G_activation=torch.nn.ReLU(inplace=False),
+               BN_eps=1e-5, SN_eps=1e-12, G_mixed_precision=False, G_fp16=False,
+               G_init='ortho',
+               G_param='SN', norm_style='bn',
+               **kwargs):
+        super(BigGAnGenerator, self).__init__()
+        self.c_dim = c_dim
+        # Channel width mulitplier
+        self.ch = G_ch
+        # Dimensionality of the latent space
+        self.z_dim = z_dim
+        # The initial spatial dimensions
+        self.bottom_width = bottom_width
+        # Resolution of the output
+        self.img_resolution = img_resolution
+        # Kernel size?
+        self.kernel_size = G_kernel_size
+        # Attention?
+        self.attention = G_attn
+        # number of classes, for use in categorical conditional generation
+        self.n_classes = n_classes
+        # Use shared embeddings?
+        self.G_shared = G_shared
+        # Dimensionality of the shared embedding? Unused if not using G_shared
+        self.shared_dim = shared_dim if shared_dim > 0 else z_dim
+        # Hierarchical latent space?
+        self.hier = hier
+        # Cross replica batchnorm?
+        self.cross_replica = cross_replica
+        # Use my batchnorm?
+        self.mybn = mybn
+        # nonlinearity for residual blocks
+        self.activation = G_activation
+        # Initialization style
+        self.init = G_init
+        # Parameterization style
+        self.G_param = G_param
+        # Normalization style
+        self.norm_style = norm_style
+        # Epsilon for BatchNorm?
+        self.BN_eps = BN_eps
+        # Epsilon for Spectral Norm?
+        self.SN_eps = SN_eps
+        # fp16?
+        self.fp16 = G_fp16
+        # Architecture dict
+        self.arch = G_arch(self.ch, self.attention)[img_resolution]
+
+        # If using hierarchical latents, adjust z
+        if self.hier:
+          # Number of places z slots into
+            self.num_slots = len(self.arch['in_channels']) + 1
+            self.z_chunk_size = (self.z_dim // self.num_slots)
+          # Recalculate latent dimensionality for even splitting into chunks
+            self.z_dim = self.z_chunk_size *  self.num_slots
+        else:
+            self.num_slots = 1
+            self.z_chunk_size = 0
+
+        # Which convs, batchnorms, and linear layers to use
+        if self.G_param == 'SN':
+            self.which_conv = functools.partial(layers.SNConv2d,
+                              kernel_size=3, padding=1,
+                              num_svs=num_G_SVs, num_itrs=num_G_SV_itrs,
+                              eps=self.SN_eps)
+            self.which_linear = functools.partial(layers.SNLinear,
+                              num_svs=num_G_SVs, num_itrs=num_G_SV_itrs,
+                              eps=self.SN_eps)
+        else:
+            self.which_conv = functools.partial(torch.nn.Conv2d, kernel_size=3, padding=1)
+            self.which_linear = torch.nn.Linear
+
+        # We use a non-spectral-normed embedding here regardless;
+        # For some reason applying SN to G's embedding seems to randomly cripple G
+        self.which_embedding = torch.nn.Embedding
+        bn_linear = (functools.partial(self.which_linear, bias=False) if self.G_shared
+                     else self.which_embedding)
+        self.which_bn = functools.partial(layers.ccbn,
+                              which_linear=bn_linear,
+                              cross_replica=self.cross_replica,
+                              mybn=self.mybn,
+                              input_size=(self.shared_dim + self.z_chunk_size if self.G_shared
+                                          else self.n_classes),
+                              norm_style=self.norm_style,
+                              eps=self.BN_eps)
+
+
+        # Prepare model
+        # If not using shared embeddings, self.shared is just a passthrough
+        self.shared = (self.which_embedding(n_classes, self.shared_dim) if G_shared 
+                        else layers.identity())
+        # First linear layer
+        self.linear = self.which_linear(self.z_dim // self.num_slots,
+                                        self.arch['in_channels'][0] * (self.bottom_width **2))
+
+        # self.blocks is a doubly-nested list of modules, the outer loop intended
+        # to be over blocks at a given resolution (resblocks and/or self-attention)
+        # while the inner loop is over a given block
+        self.blocks = []
+        for index in range(len(self.arch['out_channels'])):
+            self.blocks += [[layers.GBlock(in_channels=self.arch['in_channels'][index],
+                                 out_channels=self.arch['out_channels'][index],
+                                 which_conv=self.which_conv,
+                                 which_bn=self.which_bn,
+                                 activation=self.activation,
+                                 upsample=(functools.partial(torch.nn.functional.interpolate, scale_factor=2)
+                                           if self.arch['upsample'][index] else None))]]
+
+            # If attention on this block, attach it to the end
+            if self.arch['attention'][self.arch['resolution'][index]]:
+                print('Adding attention layer in G at resolution %d' % self.arch['resolution'][index])
+                self.blocks[-1] += [layers.Attention(self.arch['out_channels'][index], self.which_conv)]
+
+        # Turn self.blocks into a ModuleList so that it's all properly registered.
+        self.blocks = torch.nn.ModuleList([torch.nn.ModuleList(block) for block in self.blocks])
+
+        # output layer: batchnorm-relu-conv.
+        # Consider using a non-spectral conv here
+        self.output_layer = torch.nn.Sequential(layers.bn(self.arch['out_channels'][-1],
+                                                    cross_replica=self.cross_replica,
+                                                    mybn=self.mybn),
+                                        self.activation,
+                                        self.which_conv(self.arch['out_channels'][-1], 3))
+
+        # Initialize weights. Optionally skip init for testing.
+        
+        self.init_weights()
+
+    # Initialize
+    def init_weights(self):
+        self.param_count = 0
+        for module in self.modules():
+            if (isinstance(module, torch.nn.Conv2d) 
+              or isinstance(module, torch.nn.Linear) 
+              or isinstance(module, torch.nn.Embedding)):
+                if self.init == 'ortho':
+                    init.orthogonal_(module.weight)
+                elif self.init == 'N02':
+                    init.normal_(module.weight, 0, 0.02)
+                elif self.init in ['glorot', 'xavier']:
+                    init.xavier_uniform_(module.weight)
+                else:
+                    print('Init style not recognized...')
+                self.param_count += sum([p.data.nelement() for p in module.parameters()])
+        print('Param count for G''s initialized parameters: %d' % self.param_count)
+
+        
+    # Note on this forward function: we pass in a y vector which has
+    # already been passed through G.shared to enable easy class-wise
+    # interpolation later. If we passed in the one-hot and then ran it through
+    # G.shared in this forward function, it would be harder to handle.
+    def forward(self, z, c, noise_mode='random'):
+    # If hierarchical, concatenate zs and ys
+        y = torch.argmax(c, dim=1)
+
+        if self.hier:
+            zs = torch.split(z, self.z_chunk_size, 1)
+            z = zs[0]
+            ys = [torch.cat([y, item], 1) for item in zs[1:]]
+        else:
+            ys = [y] * len(self.blocks)
+
+        # First linear layer
+        h = self.linear(z)
+        # Reshape
+        h = h.view(h.size(0), -1, self.bottom_width, self.bottom_width)
+
+        # Loop over blocks
+        for index, blocklist in enumerate(self.blocks):
+          # Second inner loop in case block has multiple layers
+          for block in blocklist:
+            h = block(h, ys[index])
+
+        # Apply batchnorm-relu-conv-tanh at output
+        return torch.tanh(self.output_layer(h))
+
+
+
+
+# Discriminator architecture, same paradigm as G's above
+def D_arch(ch=64, attention='64',ksize='333333', dilation='111111'):
+    arch = {}
+    arch[256] = {'in_channels' :  [3] + [ch*item for item in [1, 2, 4, 8, 8, 16]],
+               'out_channels' : [item * ch for item in [1, 2, 4, 8, 8, 16, 16]],
+               'downsample' : [True] * 6 + [False],
+               'resolution' : [128, 64, 32, 16, 8, 4, 4 ],
+               'attention' : {2**i: 2**i in [int(item) for item in attention.split('_')]
+                          for i in range(2,8)}}
+    arch[128] = {'in_channels' :  [3] + [ch*item for item in [1, 2, 4, 8, 16]],
+               'out_channels' : [item * ch for item in [1, 2, 4, 8, 16, 16]],
+               'downsample' : [True] * 5 + [False],
+               'resolution' : [64, 32, 16, 8, 4, 4],
+               'attention' : {2**i: 2**i in [int(item) for item in attention.split('_')]
+                          for i in range(2,8)}}
+    arch[64]  = {'in_channels' :  [3] + [ch*item for item in [1, 2, 4, 8]],
+               'out_channels' : [item * ch for item in [1, 2, 4, 8, 16]],
+               'downsample' : [True] * 4 + [False],
+               'resolution' : [32, 16, 8, 4, 4],
+               'attention' : {2**i: 2**i in [int(item) for item in attention.split('_')]
+                          for i in range(2,7)}}
+    arch[32]  = {'in_channels' :  [3] + [item * ch for item in [4, 4, 4]],
+               'out_channels' : [item * ch for item in [4, 4, 4, 4]],
+               'downsample' : [True, True, False, False],
+               'resolution' : [16, 16, 16, 16],
+               'attention' : {2**i: 2**i in [int(item) for item in attention.split('_')]
+                          for i in range(2,6)}}
+    return arch
+
+
+
+@discriminators.add_to_registry("big_gan")
+class BigGanDiscriminator(torch.nn.Module):
+
+  def __init__(self, z_dim=128, c_dim=10, D_ch=64, D_wide=True, img_resolution=128,
+               D_kernel_size=3, D_attn='64', n_classes=10,
+               num_D_SVs=1, num_D_SV_itrs=1, D_activation=torch.nn.ReLU(inplace=False),
+               SN_eps=1e-12, output_dim=1, D_mixed_precision=False, D_fp16=False,
+               D_init='ortho', D_param='SN', **kwargs):
+    super(BigGanDiscriminator, self).__init__()
+    self.z_dim = z_dim
+    self.c_dim = c_dim
+    # Width multiplier
+    self.ch = D_ch
+    # Use Wide D as in BigGAN and SA-GAN or skinny D as in SN-GAN?
+    self.D_wide = D_wide
+    # Resolution
+    self.img_resolution = img_resolution
+    # Kernel size
+    self.kernel_size = D_kernel_size
+    # Attention?
+    self.attention = D_attn
+    # Number of classes
+    self.n_classes = n_classes
+    # Activation
+    self.activation = D_activation
+    # Initialization style
+    self.init = D_init
+    # Parameterization style
+    self.D_param = D_param
+    # Epsilon for Spectral Norm?
+    self.SN_eps = SN_eps
+    # Fp16?
+    self.fp16 = D_fp16
+    # Architecture
+    self.arch = D_arch(self.ch, self.attention)[img_resolution]
+
+    # Which convs, batchnorms, and linear layers to use
+    # No option to turn off SN in D right now
+    if self.D_param == 'SN':
+      self.which_conv = functools.partial(layers.SNConv2d,
+                          kernel_size=3, padding=1,
+                          num_svs=num_D_SVs, num_itrs=num_D_SV_itrs,
+                          eps=self.SN_eps)
+      self.which_linear = functools.partial(layers.SNLinear,
+                          num_svs=num_D_SVs, num_itrs=num_D_SV_itrs,
+                          eps=self.SN_eps)
+      self.which_embedding = functools.partial(layers.SNEmbedding,
+                              num_svs=num_D_SVs, num_itrs=num_D_SV_itrs,
+                              eps=self.SN_eps)
+    # Prepare model
+    # self.blocks is a doubly-nested list of modules, the outer loop intended
+    # to be over blocks at a given resolution (resblocks and/or self-attention)
+    self.blocks = []
+    for index in range(len(self.arch['out_channels'])):
+      self.blocks += [[layers.DBlock(in_channels=self.arch['in_channels'][index],
+                       out_channels=self.arch['out_channels'][index],
+                       which_conv=self.which_conv,
+                       wide=self.D_wide,
+                       activation=self.activation,
+                       preactivation=(index > 0),
+                       downsample=(torch.nn.AvgPool2d(2) if self.arch['downsample'][index] else None))]]
+      # If attention on this block, attach it to the end
+      if self.arch['attention'][self.arch['resolution'][index]]:
+        print('Adding attention layer in D at resolution %d' % self.arch['resolution'][index])
+        self.blocks[-1] += [layers.Attention(self.arch['out_channels'][index],
+                                             self.which_conv)]
+    # Turn self.blocks into a ModuleList so that it's all properly registered.
+    self.blocks = torch.nn.ModuleList([torch.nn.ModuleList(block) for block in self.blocks])
+    # Linear output layer. The output dimension is typically 1, but may be
+    # larger if we're e.g. turning this into a VAE with an inference output
+    self.linear = self.which_linear(self.arch['out_channels'][-1], output_dim)
+    # Embedding for projection discrimination
+    self.embed = self.which_embedding(self.n_classes, self.arch['out_channels'][-1])
+
+    # Initialize weights
+    self.init_weights()
+
+
+  # Initialize
+  def init_weights(self):
+    self.param_count = 0
+    for module in self.modules():
+      if (isinstance(module,torch. nn.Conv2d)
+          or isinstance(module, torch.nn.Linear)
+          or isinstance(module, torch.nn.Embedding)):
+        if self.init == 'ortho':
+          init.orthogonal_(module.weight)
+        elif self.init == 'N02':
+          init.normal_(module.weight, 0, 0.02)
+        elif self.init in ['glorot', 'xavier']:
+          init.xavier_uniform_(module.weight)
+        else:
+          print('Init style not recognized...')
+        self.param_count += sum([p.data.nelement() for p in module.parameters()])
+    print('Param count for D''s initialized parameters: %d' % self.param_count)
+
+  def forward(self, x, c=None):
+    # Stick x into h for cleaner for loops without flow control
+    y = torch.argmax(c, dim=1) if c is not None else None
+    h = x
+    # Loop over blocks
+    for index, blocklist in enumerate(self.blocks):
+      for block in blocklist:
+        h = block(h)
+    # Apply global sum pooling as in SN-GAN
+    h = torch.sum(self.activation(h), [2, 3])
+    # Get initial class-unconditional output
+    out = self.linear(h)
+    # Get projection of final featureset onto class vectors and add to evidence
+    out = out + torch.sum(self.embed(y) * h, 1, keepdim=True)
+    return out
+

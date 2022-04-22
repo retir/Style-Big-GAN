@@ -105,7 +105,8 @@ def persistent_class(orig_class):
             self._init_args = copy.deepcopy(args)
             self._init_kwargs = copy.deepcopy(kwargs)
             assert orig_class.__name__ in orig_module.__dict__
-            _check_pickleable(self.__reduce__())
+            
+            #_check_pickleable(self.__reduce__())
 
         @property
         def init_args(self):

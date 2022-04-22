@@ -148,6 +148,7 @@ def train(config):
         start_step = checkpoint['last_step'] + 1
     pbar = Logger(model_config.total_steps + 1, start_step)
     #with Logger(model_config.total_steps + 1, start_step) as pbar:
+    total_img = 0
     for step in pbar:
         
         # Discriminator
@@ -156,6 +157,7 @@ def train(config):
                 z = torch.randn(config.gen.batch, model_config.z_dim).to(device)
                 fake = net_G(z).detach()
             real = next(looper).to(device)
+            total_img += config.gen.batch # --------
             net_D_real = net_D(real)
             net_D_fake = net_D(fake)
             loss = loss_fn(net_D_real, net_D_fake)
@@ -214,6 +216,7 @@ def train(config):
                 'last_step' : step,
             }, os.path.join(config.log.logdir + f'/{config.exp.name}', 'model.pt'))
             if config.log.record:
+                print(f'TOTAL KIMG: {total_img / 1000}')
                 imgs = generate_imgs(
                     net_G, device, model_config.z_dim,
                     config.gen.kimg * 1000, config.gen.batch)

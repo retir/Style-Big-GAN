@@ -127,6 +127,18 @@ def training_loop(
     wandb_project           = '',
     
 ):
+    tmp = [start_options, run_dir, training_set_kwargs, data_loader_kwargs, G_kwargs, D_kwargs, G_opt_kwargs,
+         D_opt_kwargs, augment_kwargs, loss_kwargs, metrics, random_seed, num_gpus, batch_size, ema_kimg,
+         ema_rampup, G_reg_interval, D_reg_interval, augment_p, ada_target, ada_interval, ada_kimg,
+         total_kimg, kimg_per_tick, image_snapshot_ticks, network_snapshot_ticks, resume_params, cudnn_benchmark,
+         allow_tf32, abort_fn, progress_fn]
+    tmp_names = ['start_options', 'run_dir', 'training_set_kwargs', 'data_loader_kwargs', 'G_kwargs', 'D_kwargs', 'G_opt_kwargs',
+         'D_opt_kwargs', 'augment_kwargs', 'loss_kwargs', 'metrics', 'random_seed', 'num_gpus', 'batch_size', 'ema_kimg',
+         'ema_rampup', 'G_reg_interval', 'D_reg_interval', 'augment_p', 'ada_target', 'ada_interval', 'ada_kimg',
+         'total_kimg', 'kimg_per_tick', 'image_snapshot_ticks', 'network_snapshot_ticks', 'resume_params', 'cudnn_benchmark',
+         'allow_tf32', 'abort_fn', 'progress_fn']
+    for i in range(len(tmp)):
+        print(f'{tmp_names[i]} : {tmp[i]}')
     # Initialize.
     wandb_step = start_options['wandb_step']
     start_time = time.time()
@@ -387,14 +399,24 @@ def training_loop(
                 with open(snapshot_pkl, 'wb') as f:
                     pickle.dump(snapshot_data, f)
                     
+            # Updating args
+            args.start_options['cur_nimg']= cur_nimg
+            args.start_options['cur_tick']= cur_tick
+            args.start_options['batch_idx'] = batch_idx
+            args.start_options['wandb_step'] = wandb_step
+            if rank == 0:
+                with open(os.path.join(args.run_dir, 'training_options.json'), 'wt') as f:
+                    json.dump(args, f, indent=2)
+                    
 
         # Evaluate metrics.
         if (snapshot_data is not None) and (len(metrics) > 0):
             if rank == 0:
                 print('Evaluating metrics...')
             for metric in metrics:
+                new_dataset_kwargs = dnnlib.EasyDict({'path' : '/home/jupyter/work/resources/Style-Big-GAN/data/cifar10.zip', 'use_labels': False, 'xflip' : False, 'max_size': 50000, 'resolution' : 32})
                 result_dict = metric_main.calc_metric(metric=metric, G=snapshot_data['G_ema'],
-                    dataset_kwargs=training_set_kwargs, num_gpus=num_gpus, rank=rank, device=device)
+                    dataset_kwargs=new_dataset_kwargs, num_gpus=num_gpus, rank=rank, device=device)
                 if wandb_use:
                     if metric == 'fid50k_full':
                         wandb.log({'FID': result_dict['results']['fid50k_full']}, step=wandb_step, commit=False)
@@ -420,15 +442,6 @@ def training_loop(
         if wandb_use:
             wandb.log({key: value['mean'] for key, value in stats_dict.items()}, step=wandb_step)
         wandb_step += 1
-        
-        # Updating args
-        args.start_options['cur_nimg']= cur_nimg
-        args.start_options['cur_tick']= cur_tick
-        args.start_options['batch_idx'] = batch_idx
-        args.start_options['wandb_step'] = wandb_step
-        if rank == 0:
-            with open(os.path.join(args.run_dir, 'training_options.json'), 'wt') as f:
-                json.dump(args, f, indent=2)
         
         timestamp = time.time()
         if stats_jsonl is not None:

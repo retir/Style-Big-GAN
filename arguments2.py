@@ -75,6 +75,11 @@ class GenArgs:
     gen_regs: List[str] = field(default_factory=lambda: [])
     disc_regs: List[str] = field(default_factory=lambda: [])
     loss_arch: str = 'sg2'
+    loss: str = 'softplus'
+    kimg_per_tick: int = 4
+    g_reg_interval: int = 16
+    d_reg_interval: int = 4
+    n_dis: int = 1
         
     gpus: int = 1
     workers: int = 3 
@@ -103,6 +108,7 @@ class GenArgs:
 @dataclass
 class Augmentations:
     aug: str = 'ada'
+    aug_type: str = 'sg2_ada'
     p: float = -1 # default = ?
     target: float = -1 # default = ?
     augpipe: str = 'bgc'

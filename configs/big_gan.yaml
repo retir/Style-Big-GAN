@@ -1,0 +1,58 @@
+exp:
+    trainer: 'base'
+gen:
+    output: /home/jupyter/work/resources/Style-Big-GAN/logs
+    gpus: 1
+    kimg: 25000
+    batch: 50
+    batch_gpu: 50
+    loss_arch: 'base'
+    loss: 'hinge'
+    generator: 'big_gan'
+    discriminator: 'big_gan'
+    g_reg_interval: 0
+    d_reg_interval: 0
+    n_dis: 4
+    
+data:
+    dataset_path: /home/jupyter/work/resources/Style-Big-GAN/data/cifar10.zip
+    cond: True
+    snap: 100
+datasets_args:
+    image_folder:
+        use_labels: True
+        max_size: 50000
+        
+gens_args:
+    big_gan:
+        G_shared: False
+        G_attn: '0'
+        G_init: 'N02'
+        n_classes: 10
+        
+        
+discs_args:
+    big_gan:
+        D_attn: '0'
+        D_init: 'N02'
+        n_classes: 10
+    
+optim_gen_args:
+    adam:
+        lr: 0.0002
+        betas: [0.0, 0.999]
+    
+optim_disc_args:
+    adam:
+        lr: 0.0002
+        betas: [0.0, 0.999]
+
+ema:
+    use_ema: True
+    kimg: 500
+
+aug:
+    aug: 'noaug'
+    
+    
+        

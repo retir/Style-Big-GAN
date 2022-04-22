@@ -36,13 +36,13 @@ def list_valid_metrics():
 
 #----------------------------------------------------------------------------
 
-def calc_metric(metric, **kwargs): # See metric_utils.MetricOptions for the full list of arguments.
+def calc_metric(metric, dataset_name='image_folder', **kwargs): # See metric_utils.MetricOptions for the full list of arguments.
     assert is_valid_metric(metric)
     opts = metric_utils.MetricOptions(**kwargs)
 
     # Calculate.
     start_time = time.time()
-    results = _metric_dict[metric](opts)
+    results = _metric_dict[metric](opts, dataset_name=dataset_name)
     total_time = time.time() - start_time
 
     # Broadcast results.
@@ -80,32 +80,32 @@ def report_metric(result_dict, run_dir=None, snapshot_pkl=None):
 # Primary metrics.
 
 @register_metric
-def fid50k_full(opts):
+def fid50k_full(opts, dataset_name='image_folder'):
     opts.dataset_kwargs.update(max_size=None, xflip=False)
-    fid = frechet_inception_distance.compute_fid(opts, max_real=None, num_gen=50000)
+    fid = frechet_inception_distance.compute_fid(opts, dataset_name=dataset_name, max_real=None, num_gen=50000)
     return dict(fid50k_full=fid)
 
 @register_metric
-def kid50k_full(opts):
+def kid50k_full(opts, dataset_name='image_folder'):
     opts.dataset_kwargs.update(max_size=None, xflip=False)
-    kid = kernel_inception_distance.compute_kid(opts, max_real=1000000, num_gen=50000, num_subsets=100, max_subset_size=1000)
+    kid = kernel_inception_distance.compute_kid(opts, dataset_name=dataset_name, max_real=1000000, num_gen=50000, num_subsets=100, max_subset_size=1000)
     return dict(kid50k_full=kid)
 
 @register_metric
-def pr50k3_full(opts):
+def pr50k3_full(opts, dataset_name='image_folder'):
     opts.dataset_kwargs.update(max_size=None, xflip=False)
-    precision, recall = precision_recall.compute_pr(opts, max_real=200000, num_gen=50000, nhood_size=3, row_batch_size=10000, col_batch_size=10000)
+    precision, recall = precision_recall.compute_pr(opts, dataset_name=dataset_name, max_real=200000, num_gen=50000, nhood_size=3, row_batch_size=10000, col_batch_size=10000)
     return dict(pr50k3_full_precision=precision, pr50k3_full_recall=recall)
 
 @register_metric
-def ppl2_wend(opts):
-    ppl = perceptual_path_length.compute_ppl(opts, num_samples=50000, epsilon=1e-4, space='w', sampling='end', crop=False, batch_size=2)
+def ppl2_wend(opts, dataset_name='image_folder'):
+    ppl = perceptual_path_length.compute_ppl(opts, dataset_name=dataset_name, num_samples=50000, epsilon=1e-4, space='w', sampling='end', crop=False, batch_size=2)
     return dict(ppl2_wend=ppl)
 
 @register_metric
-def is50k(opts):
+def is50k(opts, dataset_name='image_folder'):
     opts.dataset_kwargs.update(max_size=None, xflip=False)
-    mean, std = inception_score.compute_is(opts, num_gen=50000, num_splits=10)
+    mean, std = inception_score.compute_is(opts, dataset_name=dataset_name, num_gen=50000, num_splits=10)
     return dict(is50k_mean=mean, is50k_std=std)
 
 #----------------------------------------------------------------------------
