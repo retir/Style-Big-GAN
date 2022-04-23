@@ -1,8 +1,7 @@
 exp:
     trainer: 'base'
 gen:
-    output: /home/jupyter/work/resources/Style-Big-GAN/logs
-    gpus: 1
+    output: /content/drive/MyDrive/Style-Big-GAN/logs
     kimg: 16000
     batch: 64
     loss_arch: 'base'
@@ -15,7 +14,7 @@ gen:
     kimg_per_tick: 32
     
 data:
-    dataset_path: /home/jupyter/work/resources/Style-Big-GAN/data/cifar10.zip
+    dataset_path: /content/drive/MyDrive/Style-Big-GAN/data/cifar10.zip
 datasets_args:
     image_folder:
         use_labels: True

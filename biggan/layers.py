@@ -9,7 +9,7 @@ import torch.optim as optim
 import torch.nn.functional as F
 from torch.nn import Parameter as P
 
-from sync_batchnorm import SynchronizedBatchNorm2d as SyncBN2d
+from biggan.sync_batchnorm import SynchronizedBatchNorm2d as SyncBN2d
 
 
 # Projection of x onto y

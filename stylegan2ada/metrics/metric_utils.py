@@ -1,4 +1,4 @@
-﻿# Copyright (c) 2021, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2021, NVIDIA CORPORATION.  All rights reserved.
 #
 # NVIDIA CORPORATION and its licensors retain all intellectual property
 # and proprietary rights in and to this software, related documentation
@@ -15,7 +15,7 @@ import uuid
 import numpy as np
 import torch
 import stylegan2ada.dnnlib as dnnlib
-from datasets import datasets
+from train_parts.datasets import datasets
 
 #----------------------------------------------------------------------------
 

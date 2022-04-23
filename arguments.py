@@ -3,7 +3,14 @@ from typing import Optional, List, Tuple
 from dataclasses import dataclass, field
 from omegaconf import OmegaConf, MISSING
 import utils
-import gan_collections.models as models
+
+from train_parts_args.augmentaions_agrs import augpipe_specs
+from train_parts_args.datasets_args import datasets_args, dataloaders_args
+from train_parts_args.gens_and_discs_args import gens_args, discs_args
+from train_parts_args.losses_arch_args import losses_arch_args
+from train_parts_args.optim_args import optim_gen_args, optim_disc_args
+from train_parts_args.regs_args import gen_regs_args, disc_regs_args
+
 
 
 args = utils.ClassRegistry()
@@ -18,16 +25,16 @@ class ExperimentArgs:
     notes: str = "empty notes"
     pretrain: bool = False
     pretrain_path: str = './logs'
-    base_cfg: str = 'auto'
     dry_run: bool = False
-    trainer: str = 'stylegan'
+    trainer: str = 'base'
     wandb: bool = True
 
         
 @args.add_to_registry("data")
 @dataclass
 class Dataset:
-    dataset: str = 'cifar10'
+    dataset: str = 'image_folder'
+    dataloader: str = 'basic'
     dataset_path: str = './data'
     snap: int = 50
     cond: bool = False
@@ -58,20 +65,49 @@ class GenArgs:
     gamma: float = -1
     kimg: int = -1
     batch: int = -1 # Поправить +
+    batch_gpu: int = 32
     seed: int = 0
+    generator: str = 'sg2_classic'
+    discriminator: str = 'sg2_classic'
+    optim_gen: str = 'adam'
+    optim_disc: str = 'adam'
+    gen_regs: List[str] = field(default_factory=lambda: [])
+    disc_regs: List[str] = field(default_factory=lambda: [])
+    loss_arch: str = 'sg2'
+    loss: str = 'softplus'
+    kimg_per_tick: int = 4
+    g_reg_interval: int = 16
+    d_reg_interval: int = 4
+    n_dis: int = 1
         
+    gpus: int = 1
+    workers: int = 3 
+
+        
+@args.add_to_registry("perf")
+@dataclass
+class GenArgs:
     fp32: bool = False
     nhwc: bool = False
     allow_tf32: bool = False
-    nobench: bool = False
-    gpus: int = 1
-    workers: int = 3
+    nobench: bool = False        
+
+        
+        
+        
+@args.add_to_registry("ema")
+@dataclass
+class GenArgs:
+    use_ema: bool = True
+    kimg: int = 20
+    ramp: float = -1 # None 
         
 
 @args.add_to_registry("aug")
 @dataclass
 class Augmentations:
     aug: str = 'ada'
+    aug_type: str = 'sg2_ada'
     p: float = -1 # default = ?
     target: float = -1 # default = ?
     augpipe: str = 'bgc'
@@ -81,13 +117,38 @@ class Augmentations:
 @dataclass
 class TransferLearning:
     resume: str = 'noresume'
-    resume_dir: str = './logs'
-    args_name: str = 'training_options.json'
-    resume_model: str = ''
+    resume_url: str = ''
     freezed: int = -1
         
-ModelsArgs = models.models.make_dataclass_from_args("ModelsArgs")
-args.add_to_registry("model_params")(ModelsArgs)
+DatasetArgs = datasets_args.make_dataclass_from_args("DatasetArgs")
+args.add_to_registry("datasets_args")(DatasetArgs)
+
+DataloaderArgs = dataloaders_args.make_dataclass_from_args("DataloaderArgs")
+args.add_to_registry("dataloaders_args")(DataloaderArgs)
+
+GensArgs = gens_args.make_dataclass_from_args("GensArgs")
+args.add_to_registry("gens_args")(GensArgs)
+
+DiscsArgs = discs_args.make_dataclass_from_args("DiscsArgs")
+args.add_to_registry("discs_args")(DiscsArgs)
+
+OptimGenArgs = optim_gen_args.make_dataclass_from_args("OptimGenArgs")
+args.add_to_registry("optim_gen_args")(OptimGenArgs)
+
+OptimDiscArgs = optim_disc_args.make_dataclass_from_args("OptimDiscArgs")
+args.add_to_registry("optim_disc_args")(OptimDiscArgs)
+
+LossesArchArgs = losses_arch_args.make_dataclass_from_args("LossesArchArgs")
+args.add_to_registry("losses_arch_args")(LossesArchArgs)
+
+AugpipeArgs = augpipe_specs.make_dataclass_from_args("AugpipeArgs")
+args.add_to_registry("augpipe_specs")(AugpipeArgs)
+
+GenRegsArgs = gen_regs_args.make_dataclass_from_args("GenRegsArgs")
+args.add_to_registry("gen_regs_all")(GenRegsArgs)
+
+DiscRegsArgs = disc_regs_args.make_dataclass_from_args("DiscRegsArgs")
+args.add_to_registry("disc_regs_all")(DiscRegsArgs)
 
 
 Args = args.make_dataclass_from_classes("Args")

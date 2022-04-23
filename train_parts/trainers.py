@@ -6,11 +6,8 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
-"""Train a GAN using the techniques described in the paper
-"Training Generative Adversarial Networks with Limited Data"."""
 
 import os
-# import click
 import re
 import json
 import tempfile
@@ -35,13 +32,14 @@ from stylegan2ada.torch_utils.ops import grid_sample_gradfix
 import stylegan2ada.legacy as legacy
 from stylegan2ada.metrics import metric_main
 
-from gens_and_discs import generators, discriminators
-from datasets import datasets
-from augmentations import augmentations
-from losses import losses
-from losses_base import losses_arch
-from optimizers import optimizers
-from augmentaions_agrs import augpipe_specs
+from train_parts.generators import generators
+from train_parts.discriminators import discriminators
+from train_parts.datasets import datasets
+from train_parts.augmentations import augmentations
+from train_parts.losses import losses
+from train_parts.losses_base import losses_arch
+from train_parts.optimizers import optimizers
+from train_parts_args.augmentaions_agrs import augpipe_specs
 from dataclasses import asdict
 from collections import defaultdict
 
@@ -246,7 +244,7 @@ class BaseTrainer:
             if not 1 <= config.data.subset <= args.training_set_kwargs.max_size:
                 raise UserError(f'--subset must be between 1 and {args.training_set_kwargs.max_size}')
             desc += f'-subset{config.data.subset}'
-            if subset < args.training_set_kwargs.max_size:
+            if config.data.subset < args.training_set_kwargs.max_size:
                 args.training_set_kwargs.max_size = config.data.subset
                 args.training_set_kwargs.random_seed = args.random_seed
 
@@ -373,7 +371,7 @@ class BaseTrainer:
 #----------------------------------------------------------------------------
     
     
-    def setup_logger(self):
+    def setup_logs(self):
         dnnlib.util.Logger(should_flush=True)
         
         # Pick output directory.
@@ -389,10 +387,7 @@ class BaseTrainer:
         if self.rank == 0:
             print()
             print('Training options:')
-            #print(type(self.args))
-            #print(type(dict(self.args)))
             printer(self.args)
-            #print(json.dumps(self.args, indent=2))
             print()
             print(f'Output directory:   {self.args.run_dir}')
             print(f'Training data:      {self.args.training_set_kwargs.path}')
@@ -442,6 +437,23 @@ class BaseTrainer:
             self.stats_tfevents = tensorboard.SummaryWriter(self.args.run_dir)
         except ImportError as err:
             print('Skipping tfevents export:', err)
+
+
+    def distribute_torch(self, temp_dir):
+        if self.args.num_gpus > 1:
+            init_file = os.path.abspath(os.path.join(temp_dir, '.torch_distributed_init'))
+            if os.name == 'nt':
+                init_method = 'file:///' + init_file.replace('\\', '/')
+                torch.distributed.init_process_group(backend='gloo', init_method=init_method, rank=rank, world_size=trainer.args.num_gpus)
+            else:
+                init_method = f'file://{init_file}'
+                torch.distributed.init_process_group(backend='nccl', init_method=init_method, rank=self.rank, world_size=self.args.num_gpus)
+
+        # Init torch_utils.
+        sync_device = torch.device('cuda', self.rank) if self.args.num_gpus > 1 else None
+        training_stats.init_multiprocessing(rank=self.rank, sync_device=sync_device)
+        if self.rank != 0:
+            custom_ops.verbosity = 'none'
         
     
     def init_params(self):
@@ -520,7 +532,7 @@ class BaseTrainer:
                 self.ada_stats = training_stats.Collector(regex='Loss/signs/real')
      
     
-    def distrib_acrros_gpu(self): # Изменить для Style GAN
+    def distrib_acrros_gpu(self):
         if self.rank == 0:
             print(f'Distributing across {self.args.num_gpus} GPUs...')
         self.ddp_modules = dict()
@@ -543,10 +555,7 @@ class BaseTrainer:
                                                        dis_regs = [(key, self.disc_regs_all[key]) for key in self.args.names.disc_regs],
                                                        **self.ddp_modules,
                                                        **self.args.loss_kwargs)
-        #loss_kwargs = {'class_name': 'training.loss.StyleGAN2Loss', 'r1_gamma': 0.01, 'pl_weight': 0, 'style_mixing_prob': 0}
-        #self.loss = dnnlib.util.construct_class_by_name(device=self.device, **self.ddp_modules, **loss_kwargs)
-        
-        
+
         intervals = defaultdict(lambda:1)
         intervals['G'] = self.args.n_dis         
         
@@ -818,7 +827,7 @@ class BaseTrainer:
                 
 @trainers.add_to_registry("sg2")
 class SG2Trainer(BaseTrainer):
-    def distrib_acrros_gpu(self): # Изменить для Style GAN
+    def distrib_acrros_gpu(self):
         if self.rank == 0:
             print(f'Distributing across {self.args.num_gpus} GPUs...')
         self.ddp_modules = dict()

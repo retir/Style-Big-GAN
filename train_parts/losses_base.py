@@ -1,4 +1,4 @@
-﻿# Copyright (c) 2021, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2021, NVIDIA CORPORATION.  All rights reserved.
 #
 # NVIDIA CORPORATION and its licensors retain all intellectual property
 # and proprietary rights in and to this software, related documentation
@@ -13,9 +13,9 @@ from stylegan2ada.torch_utils import misc
 from stylegan2ada.torch_utils.ops import conv2d_gradfix
 import stylegan2ada.dnnlib as dnnlib
 import utils
-from regularizations import generator_regs
-from regularizations import discriminator_regs
-from losses import losses
+from train_parts.regularizations import generator_regs
+from train_parts.regularizations import discriminator_regs
+from train_parts.losses import losses
 
 losses_arch = utils.ClassRegistry()
 

@@ -1,7 +1,7 @@
 exp:
     trainer: 'base'
 gen:
-    output: /home/jupyter/work/resources/Style-Big-GAN/logs
+    output: /content/drive/MyDrive/Style-Big-GAN/logs
     gpus: 1
     kimg: 25000
     batch: 50
@@ -15,7 +15,7 @@ gen:
     n_dis: 4
     
 data:
-    dataset_path: /home/jupyter/work/resources/Style-Big-GAN/data/cifar10.zip
+    dataset_path: /content/drive/MyDrive/Style-Big-GAN/data/cifar10.zip
     cond: True
     snap: 100
 datasets_args:

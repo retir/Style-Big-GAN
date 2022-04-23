@@ -1,23 +1,19 @@
 exp:
     trainer: 'base'
 gen:
-    output: /home/jupyter/work/resources/Style-Big-GAN/logs
+    output: /content/drive/MyDrive/Style-Big-GAN/logs
     gpus: 1
-    kimg: 16000
-    batch: 64
-    batch_gpu: 64
+    kimg: 3200
+    batch: 128
     loss_arch: 'base'
-    loss: 'wasserstein'
-    generator: 'res32_wgan'
-    discriminator: 'res32_wgan'
+    loss: 'bcew'
+    generator: 'cnn32_dcgan'
+    discriminator: 'cnn32_dcgan'
     g_reg_interval: 0
     d_reg_interval: 0
-    n_dis: 5
-    disc_regs: ['grad_pen']
-    kimg_per_tick: 32
     
 data:
-    dataset_path: /home/jupyter/work/resources/Style-Big-GAN/data/cifar10.zip
+    dataset_path: /content/drive/MyDrive/Style-Big-GAN/data/cifar10.zip
 datasets_args:
     image_folder:
         use_labels: True
@@ -25,21 +21,21 @@ datasets_args:
         
 gens_args:
     cnn32_dcgan:
-        z_dim: 128        
+        z_dim: 100        
         
 discs_args:
     cnn32_dcgan:
-        z_dim: 128
+        z_dim: 100
     
 optim_gen_args:
     adam:
         lr: 0.0002
-        betas: [0.0, 0.9]
+        betas: [0.5, 0.9]
     
 optim_disc_args:
     adam:
         lr: 0.0002
-        betas: [0.0, 0.9]
+        betas: [0.5, 0.9]
 
 ema:
     use_ema: False
