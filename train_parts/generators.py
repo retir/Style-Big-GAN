@@ -20,6 +20,7 @@ from stylegan2ada.torch_utils.ops import conv2d_resample
 from stylegan2ada.torch_utils.ops import upfirdn2d
 from stylegan2ada.torch_utils.ops import bias_act
 from stylegan2ada.torch_utils.ops import fma
+from biggan.layers import Attention
 
 #----------------------------------------------------------------------------
 
@@ -352,6 +353,7 @@ class SynthesisBlock(torch.nn.Module):
         conv_clamp          = None,         # Clamp the output of convolution layers to +-X, None = disable clamping.
         use_fp16            = False,        # Use FP16 for this block?
         fp16_channels_last  = False,        # Use channels-last memory format with FP16?
+        attention           = False,        # Use attention in the end of the block
         **layer_kwargs,                     # Arguments for SynthesisLayer.
     ):
         assert architecture in ['orig', 'skip', 'resnet']
@@ -367,6 +369,8 @@ class SynthesisBlock(torch.nn.Module):
         self.register_buffer('resample_filter', upfirdn2d.setup_filter(resample_filter))
         self.num_conv = 0
         self.num_torgb = 0
+
+        self.attention = Attention(out_channels) if attention else None
 
         if in_channels == 0:
             self.const = torch.nn.Parameter(torch.randn([out_channels, resolution, resolution]))
@@ -418,6 +422,10 @@ class SynthesisBlock(torch.nn.Module):
             x = self.conv0(x, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs)
             x = self.conv1(x, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs)
 
+        if self.attention:
+            x_type = x.type()
+            x = self.attention(x.to(torch.float32)).type(x_type)
+            
         # ToRGB.
         if img is not None:
             misc.assert_shape(img, [None, self.img_channels, self.resolution // 2, self.resolution // 2])
@@ -426,7 +434,7 @@ class SynthesisBlock(torch.nn.Module):
             y = self.torgb(x, next(w_iter), fused_modconv=fused_modconv)
             y = y.to(dtype=torch.float32, memory_format=torch.contiguous_format)
             img = img.add_(y) if img is not None else y
-
+        
         assert x.dtype == dtype
         assert img is None or img.dtype == torch.float32
         return x, img
@@ -442,6 +450,7 @@ class SynthesisNetwork(torch.nn.Module):
         channel_base    = 32768,    # Overall multiplier for the number of channels.
         channel_max     = 512,      # Maximum number of channels in any layer.
         num_fp16_res    = 0,        # Use FP16 for the N highest resolutions.
+        attentions      = [],
         **block_kwargs,             # Arguments for SynthesisBlock.
     ):
         assert img_resolution >= 4 and img_resolution & (img_resolution - 1) == 0
@@ -461,7 +470,7 @@ class SynthesisNetwork(torch.nn.Module):
             use_fp16 = (res >= fp16_resolution)
             is_last = (res == self.img_resolution)
             block = SynthesisBlock(in_channels, out_channels, w_dim=w_dim, resolution=res,
-                img_channels=img_channels, is_last=is_last, use_fp16=use_fp16, **block_kwargs)
+                img_channels=img_channels, is_last=is_last, use_fp16=use_fp16, attention=res in attentions, **block_kwargs)
             self.num_ws += block.num_conv
             if is_last:
                 self.num_ws += block.num_torgb
@@ -482,6 +491,7 @@ class SynthesisNetwork(torch.nn.Module):
         for res, cur_ws in zip(self.block_resolutions, block_ws):
             block = getattr(self, f'b{res}')
             x, img = block(x, img, cur_ws, **block_kwargs)
+
         return img
 
 #----------------------------------------------------------------------------
@@ -495,6 +505,7 @@ class Generator(torch.nn.Module):
         w_dim,                      # Intermediate latent (W) dimensionality.
         img_resolution,             # Output resolution.
         img_channels,               # Number of output color channels.
+        attentions          = [],
         mapping_kwargs      = {},   # Arguments for MappingNetwork.
         synthesis_kwargs    = {},   # Arguments for SynthesisNetwork.
     ):
@@ -504,7 +515,7 @@ class Generator(torch.nn.Module):
         self.w_dim = w_dim
         self.img_resolution = img_resolution
         self.img_channels = img_channels
-        self.synthesis = SynthesisNetwork(w_dim=w_dim, img_resolution=img_resolution, img_channels=img_channels, **synthesis_kwargs)
+        self.synthesis = SynthesisNetwork(w_dim=w_dim, img_resolution=img_resolution, img_channels=img_channels, attentions=attentions,**synthesis_kwargs)
         self.num_ws = self.synthesis.num_ws
         self.mapping = MappingNetwork(z_dim=z_dim, c_dim=c_dim, w_dim=w_dim, num_ws=self.num_ws, **mapping_kwargs)
 

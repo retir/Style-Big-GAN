@@ -24,7 +24,7 @@ def main():
     print('Launching multiprocesses...')
     torch.multiprocessing.set_start_method('spawn')
     with tempfile.TemporaryDirectory() as temp_dir:
-        if config.gen.gpus == 1:
+        if config.perf.gpus == 1:
             multiprocesses_main(rank=0, trainer=trainer, temp_dir=temp_dir)
         else:
             torch.multiprocessing.spawn(fn=multiprocesses_main, args=(trainer, temp_dir), nprocs=config.num_gpus)

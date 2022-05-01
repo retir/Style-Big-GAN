@@ -171,22 +171,19 @@ class BaseTrainer:
         # General options: gpus, snap, metrics, seed
         # ------------------------------------------
 
-        assert isinstance(config.gen.gpus, int)
-        if not (config.gen.gpus >= 1 and config.gen.gpus & (config.gen.gpus - 1) == 0):
+        if not (config.perf.gpus >= 1 and config.perf.gpus & (config.perf.gpus - 1) == 0):
             raise UserError('--gpus must be a power of two')
-        args.num_gpus = config.gen.gpus
+        args.num_gpus = config.perf.gpus
 
 
-        assert isinstance(config.data.snap, int)
-        if config.data.snap < 1:
+        if config.log.snap < 1:
             raise UserError('--snap must be at least 1')
-        args.image_snapshot_ticks = config.data.snap
-        args.network_snapshot_ticks = config.data.snap
+        args.image_snapshot_ticks = config.log.snap
+        args.network_snapshot_ticks = config.log.snap
 
-        #assert isinstance(config.gen.metrics, list), type(config.gen.metrics)
-        if not all(metric_main.is_valid_metric(metric) for metric in config.gen.metrics):
+        if not all(metric_main.is_valid_metric(metric) for metric in config.log.metrics):
             raise UserError('\n'.join(['--metrics can only contain the following values:'] + metric_main.list_valid_metrics()))
-        args.metrics = list(config.gen.metrics)
+        args.metrics = list(config.log.metrics)
 
         args.random_seed = config.gen.seed
         
@@ -206,7 +203,7 @@ class BaseTrainer:
         args.names.loss_arch = self.config.gen.loss_arch
         args.names.loss = self.config.gen.loss
         args.names.aug_type = self.config.aug.aug_type
-        args.use_wandb = self.config.exp.wandb
+        args.use_wandb = self.config.log.wandb
         self.gen_regs_all = self.config.gen_regs_all
         self.disc_regs_all = self.config.disc_regs_all
         args.n_dis = self.config.gen.n_dis
@@ -273,7 +270,7 @@ class BaseTrainer:
         args.G_reg_interval = config.gen.g_reg_interval
         args.progress_fn = None
         args.abort_fn = None
-        args.kimg_per_tick = self.config.gen.kimg_per_tick
+        args.kimg_per_tick = self.config.log.kimg_per_tick
         args.use_ema = self.config.ema.use_ema
 
 
@@ -363,7 +360,6 @@ class BaseTrainer:
         if config.perf.allow_tf32:
             args.allow_tf32 = True
 
-        print('START TRANSFORM')
         args = to_easy_dict(args)
         self.run_desc = desc
         self.args = args
@@ -376,12 +372,12 @@ class BaseTrainer:
         
         # Pick output directory.
         prev_run_dirs = []
-        if os.path.isdir(self.config.gen.output): # outdir
-            prev_run_dirs = [x for x in os.listdir(self.config.gen.output) if os.path.isdir(os.path.join(self.config.gen.output, x))]
+        if os.path.isdir(self.config.log.output): # outdir
+            prev_run_dirs = [x for x in os.listdir(self.config.log.output) if os.path.isdir(os.path.join(self.config.log.output, x))]
         prev_run_ids = [re.match(r'^\d+', x) for x in prev_run_dirs]
         prev_run_ids = [int(x.group()) for x in prev_run_ids if x is not None]
         cur_run_id = max(prev_run_ids, default=-1) + 1
-        self.args.run_dir = os.path.join(self.config.gen.output, f'{cur_run_id:05d}-{self.run_desc}')
+        self.args.run_dir = os.path.join(self.config.log.output, f'{cur_run_id:05d}-{self.run_desc}')
         assert not os.path.exists(self.args.run_dir)
         
         if self.rank == 0:

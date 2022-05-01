@@ -1,8 +1,8 @@
 exp:
     trainer: 'base'
+
+
 gen:
-    output: /content/drive/MyDrive/Style-Big-GAN/logs
-    gpus: 1
     kimg: 3200
     batch: 128
     loss_arch: 'base'
@@ -12,33 +12,46 @@ gen:
     g_reg_interval: 0
     d_reg_interval: 0
     
+
 data:
     dataset_path: /content/drive/MyDrive/Style-Big-GAN/data/cifar10.zip
+
+
+log:
+    output: /content/drive/MyDrive/Style-Big-GAN/logs
+
+
 datasets_args:
     image_folder:
         use_labels: True
         max_size: 50000
+
         
 gens_args:
     cnn32_dcgan:
-        z_dim: 100        
+        z_dim: 100     
+
         
 discs_args:
     cnn32_dcgan:
         z_dim: 100
+
     
 optim_gen_args:
     adam:
         lr: 0.0002
         betas: [0.5, 0.9]
-    
+
+
 optim_disc_args:
     adam:
         lr: 0.0002
         betas: [0.5, 0.9]
 
+
 ema:
     use_ema: False
+
 
 aug:
     aug: 'noaug'

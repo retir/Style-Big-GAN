@@ -20,6 +20,7 @@ from stylegan2ada.torch_utils.ops import conv2d_resample
 from stylegan2ada.torch_utils.ops import upfirdn2d
 from stylegan2ada.torch_utils.ops import bias_act
 from stylegan2ada.torch_utils.ops import fma
+from biggan.layers import Attention
 
 
 #----------------------------------------------------------------------------
@@ -213,6 +214,7 @@ class DiscriminatorBlock(torch.nn.Module):
         img_channels,                       # Number of input color channels.
         first_layer_idx,                    # Index of the first layer.
         architecture        = 'resnet',     # Architecture: 'orig', 'skip', 'resnet'.
+        attention           = False,
         activation          = 'lrelu',      # Activation function: 'relu', 'lrelu', etc.
         resample_filter     = [1,3,3,1],    # Low-pass filter to apply when resampling activations.
         conv_clamp          = None,         # Clamp the output of convolution layers to +-X, None = disable clamping.
@@ -231,6 +233,7 @@ class DiscriminatorBlock(torch.nn.Module):
         self.use_fp16 = use_fp16
         self.channels_last = (use_fp16 and fp16_channels_last)
         self.register_buffer('resample_filter', upfirdn2d.setup_filter(resample_filter))
+        self.attention = Attention(out_channels) if attention else None
 
         self.num_layers = 0
         def trainable_gen():
@@ -281,6 +284,10 @@ class DiscriminatorBlock(torch.nn.Module):
         else:
             x = self.conv0(x)
             x = self.conv1(x)
+
+        if self.attention:
+            x_type = x.type()
+            x = self.attention(x.to(torch.float32)).type(x_type)
 
         assert x.dtype == dtype
         return x, img
@@ -378,6 +385,7 @@ class Discriminator(torch.nn.Module):
         c_dim,                          # Conditioning label (C) dimensionality.
         img_resolution,                 # Input resolution.
         img_channels,                   # Number of input color channels.
+        attentions          = [],
         architecture        = 'resnet', # Architecture: 'orig', 'skip', 'resnet'.
         channel_base        = 32768,    # Overall multiplier for the number of channels.
         channel_max         = 512,      # Maximum number of channels in any layer.
@@ -410,7 +418,7 @@ class Discriminator(torch.nn.Module):
             out_channels = channels_dict[res // 2]
             use_fp16 = (res >= fp16_resolution)
             block = DiscriminatorBlock(in_channels, tmp_channels, out_channels, resolution=res,
-                first_layer_idx=cur_layer_idx, use_fp16=use_fp16, **block_kwargs, **common_kwargs)
+                first_layer_idx=cur_layer_idx, use_fp16=use_fp16, attention=res in attentions, **block_kwargs, **common_kwargs)
             setattr(self, f'b{res}', block)
             cur_layer_idx += block.num_layers
         if c_dim > 0:

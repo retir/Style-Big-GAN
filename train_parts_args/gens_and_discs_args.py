@@ -1,6 +1,8 @@
 import utils
 from dataclasses import dataclass, field
 from stylegan2ada.dnnlib import EasyDict
+from dataclasses import dataclass, field
+from typing import Optional, List, Tuple
 
 
 gens_args = utils.ClassRegistry()
@@ -28,6 +30,7 @@ class SG2classic_gen_args:
     w_dim: int = 128
     mapping_kwargs: Mappingkwargs = Mappingkwargs()
     synthesis_kwargs: Synthesiskwargs = Synthesiskwargs()
+    attentions: Tuple = ()
         
 
 @dataclass
@@ -53,6 +56,7 @@ class SG2classic_dis_args:
     channel_max: int = 512
     num_fp16_res: int = 4
     architecture: str = "resnet"
+    attentions: Tuple = ()
         
         
         

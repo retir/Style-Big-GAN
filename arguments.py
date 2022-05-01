@@ -12,8 +12,8 @@ from train_parts_args.optim_args import optim_gen_args, optim_disc_args
 from train_parts_args.regs_args import gen_regs_args, disc_regs_args
 
 
-
 args = utils.ClassRegistry()
+
 
 @args.add_to_registry("exp")
 @dataclass
@@ -23,11 +23,8 @@ class ExperimentArgs:
     name: str = MISSING
     project: str = "gan-collections"
     notes: str = "empty notes"
-    pretrain: bool = False
-    pretrain_path: str = './logs'
     dry_run: bool = False
     trainer: str = 'base'
-    wandb: bool = True
 
         
 @args.add_to_registry("data")
@@ -36,35 +33,27 @@ class Dataset:
     dataset: str = 'image_folder'
     dataloader: str = 'basic'
     dataset_path: str = './data'
-    snap: int = 50
     cond: bool = False
-    subset: int = 0 # default = all?
+    subset: int = 0 
     mirror: bool = False
     
 
 @args.add_to_registry("log")
 @dataclass
 class LogArgs:
-    eval_step: int = 5000
-    sample_step: int = 500
-    sample_size: int = 64
-    logdir: str = './logs'
-    record: bool = True
-    fid_cache: str = './stats/cifar10.train.npz'
+    snap: int = 50
+    output: str = './outputs'
+    metrics: List[str] = field(default_factory=lambda: ['fid50k_full', 'is50k'])
+    kimg_per_tick: int = 4
+    wandb: bool = True
 
 
 
 @args.add_to_registry("gen")
 @dataclass
 class GenArgs:
-    model: str = MISSING
-    generate: bool = False
-    pretrain: str = MISSING
-    output: str = './outputs'
-    metrics: List[str] = field(default_factory=lambda: ['fid50k_full', 'is50k'])
-    gamma: float = -1
     kimg: int = -1
-    batch: int = -1 # Поправить +
+    batch: int = -1
     batch_gpu: int = 32
     seed: int = 0
     generator: str = 'sg2_classic'
@@ -75,32 +64,27 @@ class GenArgs:
     disc_regs: List[str] = field(default_factory=lambda: [])
     loss_arch: str = 'sg2'
     loss: str = 'softplus'
-    kimg_per_tick: int = 4
     g_reg_interval: int = 16
     d_reg_interval: int = 4
     n_dis: int = 1
-        
-    gpus: int = 1
-    workers: int = 3 
 
         
 @args.add_to_registry("perf")
 @dataclass
-class GenArgs:
+class Performance:
     fp32: bool = False
     nhwc: bool = False
     allow_tf32: bool = False
-    nobench: bool = False        
-
-        
+    nobench: bool = False
+    gpus: int = 1
         
         
 @args.add_to_registry("ema")
 @dataclass
-class GenArgs:
+class EmaArgs:
     use_ema: bool = True
     kimg: int = 20
-    ramp: float = -1 # None 
+    ramp: float = -1 
         
 
 @args.add_to_registry("aug")
@@ -108,8 +92,8 @@ class GenArgs:
 class Augmentations:
     aug: str = 'ada'
     aug_type: str = 'sg2_ada'
-    p: float = -1 # default = ?
-    target: float = -1 # default = ?
+    p: float = -1 
+    target: float = -1
     augpipe: str = 'bgc'
         
         

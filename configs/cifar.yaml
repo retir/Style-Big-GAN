@@ -1,17 +1,26 @@
 exp:
     trainer: 'sg2'
+
+
 gen:
-    output: /content/drive/MyDrive/Style-Big-GAN/logs
-    gpus: 1
     kimg: 500
     batch: 64
     disc_regs: ['r1']
+
+
+log:
+    output: /content/drive/MyDrive/Style-Big-GAN/logs
+
+
 data:
     dataset_path: /content/drive/MyDrive/Style-Big-GAN/data/cifar10.zip
+
+
 datasets_args:
     image_folder:
         use_labels: True
         max_size: 50000
+
         
 gens_args:
     sg2_classic:
@@ -19,28 +28,34 @@ gens_args:
         w_dim: 512
         mapping_kwargs:
             num_layers : 2
+
         
 discs_args:
     sg2_classic:
         epilogue_kwargs:
             mbstd_group_size : 32
         architecture: "orig"
+
     
 optim_gen_args:
     adam:
         lr: 0.0025
+
     
 optim_disc_args:
     adam:
         lr: 0.0025
 
+
 ema:
     kimg: 500
     ramp: 0.05
+
     
 losses_arch_args:
     sg2:
         style_mixing_prob : 0
+        
     
 disc_regs_all:
     r1:
