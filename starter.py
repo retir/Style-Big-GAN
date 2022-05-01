@@ -44,8 +44,6 @@ def multiprocesses_main(rank, trainer, temp_dir):
     
     trainer.training_loop()
     
-    
-
 
 if __name__ == "__main__":
     main()

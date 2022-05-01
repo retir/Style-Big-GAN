@@ -55,7 +55,9 @@ import torch
 import json
 from omegaconf import OmegaConf
 
+
 trainers = utils.ClassRegistry()
+
 
 def setup_snapshot_image_grid(training_set, random_seed=0):
     rnd = np.random.RandomState(random_seed)
@@ -141,7 +143,7 @@ def to_easy_dict(obj):
         easy_dict[key] = to_easy_dict(value)
     return easy_dict
     
-
+#----------------------------------------------------------------------------
 
 @trainers.add_to_registry("base")
 class BaseTrainer:
@@ -162,35 +164,17 @@ class BaseTrainer:
         
         args = dnnlib.EasyDict()
         
-        args.start_options = dnnlib.EasyDict({'cur_nimg' : 0,
+
+        # ------------------------------------------
+        # Main options
+        # ------------------------------------------  
+
+        args.start_options = dnnlib.EasyDict({
+        'cur_nimg' : 0,
         'cur_tick' : 0,
         'batch_idx' : 0,
-         'wandb_step' : 0})
+        'wandb_step' : 0})
 
-        # ------------------------------------------
-        # General options: gpus, snap, metrics, seed
-        # ------------------------------------------
-
-        if not (config.perf.gpus >= 1 and config.perf.gpus & (config.perf.gpus - 1) == 0):
-            raise UserError('--gpus must be a power of two')
-        args.num_gpus = config.perf.gpus
-
-
-        if config.log.snap < 1:
-            raise UserError('--snap must be at least 1')
-        args.image_snapshot_ticks = config.log.snap
-        args.network_snapshot_ticks = config.log.snap
-
-        if not all(metric_main.is_valid_metric(metric) for metric in config.log.metrics):
-            raise UserError('\n'.join(['--metrics can only contain the following values:'] + metric_main.list_valid_metrics()))
-        args.metrics = list(config.log.metrics)
-
-        args.random_seed = config.gen.seed
-        
-        # -----------------------------------
-        # Names
-        # -----------------------------------
-        
         args.names = dnnlib.EasyDict()
         args.names.dataset = self.config.data.dataset
         args.names.dataloader = self.config.data.dataloader
@@ -203,23 +187,44 @@ class BaseTrainer:
         args.names.loss_arch = self.config.gen.loss_arch
         args.names.loss = self.config.gen.loss
         args.names.aug_type = self.config.aug.aug_type
-        args.use_wandb = self.config.log.wandb
-        self.gen_regs_all = self.config.gen_regs_all
-        self.disc_regs_all = self.config.disc_regs_all
+
         args.n_dis = self.config.gen.n_dis
+        args.random_seed = config.gen.seed
+        args.total_kimg = config.gen.kimg  # проверить батч и гпу батч на делимость
+        args.batch_size = config.gen.batch  # spec.mb
+        args.batch_gpu = config.gen.batch_gpu  # spec.mb // spec.ref_gpus
+        args.progress_fn = None 
+        args.abort_fn = None
+
+        if args.batch_size % args.batch_gpu != 0:
+            raise UserError(f'batch_gpu should devide batch')
         
-        
-        
-        
-        
+
+        # ------------------------------------------
+        # Log options
+        # ------------------------------------------
+
+        if config.log.snap < 1:
+            raise UserError('--snap must be at least 1')
+        args.image_snapshot_ticks = config.log.snap
+
+        if not all(metric_main.is_valid_metric(metric) for metric in config.log.metrics):
+            raise UserError('\n'.join(['--metrics can only contain the following values:'] + metric_main.list_valid_metrics()))
+        args.metrics = list(config.log.metrics)
+
+        args.use_wandb = self.config.log.wandb
+        args.network_snapshot_ticks = config.log.snap
+        args.kimg_per_tick = self.config.log.kimg_per_tick
+
+
         # -----------------------------------
-        # Dataset: data, cond, subset, mirror
+        # Dataset options
         # -----------------------------------
 
-        assert isinstance(config.data.dataset_path, str)
-        args.dataset = config.data.dataset
+        args.dataset = config.data.dataset # Убрать
         args.training_set_kwargs = dnnlib.EasyDict(path=config.data.dataset_path, **config.datasets_args[config.data.dataset])
         args.data_loader_kwargs = dnnlib.EasyDict(**config.dataloaders_args[config.data.dataloader])
+
         try:
             training_set = datasets[config.data.dataset](**args.training_set_kwargs)
             args.training_set_kwargs.resolution = training_set.resolution # be explicit about resolution
@@ -249,33 +254,36 @@ class BaseTrainer:
             desc += '-mirror'
             args.training_set_kwargs.xflip = True
 
-        # ------------------------------------
-        # Base config: cfg, gamma, kimg, batch
-        # ------------------------------------
+        
+        # -----------------------------------
+        # Regularization options
+        # -----------------------------------
 
+        self.gen_regs_all = self.config.gen_regs_all
+        self.disc_regs_all = self.config.disc_regs_all
+        args.D_reg_interval = config.gen.d_reg_interval
+        args.G_reg_interval = config.gen.g_reg_interval
+        
+
+        # ------------------------------------
+        # Gen, dis, ema and optimizers
+        # ------------------------------------
 
         args.G_kwargs = dnnlib.EasyDict(**config.gens_args[config.gen.generator])
         args.D_kwargs = dnnlib.EasyDict(**config.discs_args[config.gen.discriminator])
 
         args.G_opt_kwargs = dnnlib.EasyDict(**config.optim_gen_args[config.gen.optim_gen])
         args.D_opt_kwargs = dnnlib.EasyDict(**config.optim_disc_args[config.gen.optim_disc])
+
         args.loss_kwargs = dnnlib.EasyDict(**config.losses_arch_args[config.gen.loss_arch])
 
-        args.total_kimg = config.gen.kimg  # проверить батч и гпу батч на делимость
-        args.batch_size = config.gen.batch  # spec.mb
-        args.batch_gpu = config.gen.batch_gpu  # spec.mb // spec.ref_gpus
         args.ema_kimg = config.ema.kimg  # spec.ema
         args.ema_rampup = config.ema.ramp if config.ema.ramp != -1 else None # spec.ramp
-        args.D_reg_interval = config.gen.d_reg_interval
-        args.G_reg_interval = config.gen.g_reg_interval
-        args.progress_fn = None
-        args.abort_fn = None
-        args.kimg_per_tick = self.config.log.kimg_per_tick
         args.use_ema = self.config.ema.use_ema
 
 
         # ---------------------------------------------------
-        # Discriminator augmentation: aug, p, target, augpipe
+        # Discriminator augmentation
         # ---------------------------------------------------
 
         desc += f'-{config.aug.aug}'
@@ -317,8 +325,9 @@ class BaseTrainer:
         if config.aug.aug != 'noaug':
             args.augment_kwargs = dnnlib.EasyDict(**asdict(augpipe_specs[config.aug.augpipe]()))
 
+
         # ----------------------------------
-        # Transfer learning: resume, freezed
+        # Transfer learning and resuming
         # ----------------------------------
 
         resume_specs = {
@@ -338,7 +347,7 @@ class BaseTrainer:
             args.resume_pkl = resume_specs[config.trans.resume] # predefined url
         else:
             desc += '-resumecustom'
-            args.resume_pkl = config.trans.resume_url   # config.trans.resume # custom path or url
+            args.resume_pkl = config.trans.resume_url   # config.trans.resume: custom path or url
 
         if config.trans.resume != 'noresume':
             args.ada_kimg = 100 # make ADA react faster at the beginning
@@ -348,9 +357,14 @@ class BaseTrainer:
             desc += f'-freezed{config.trans.freezed:d}'
             args.D_kwargs.block_kwargs.freeze_layers = config.trans.freezed
 
+
         # -------------------------------------------------
-        # Performance options: fp32, nhwc, nobench, workers
+        # Performance options
         # -------------------------------------------------
+
+        if not (config.perf.gpus >= 1 and config.perf.gpus & (config.perf.gpus - 1) == 0):
+            raise UserError('--gpus must be a power of two')
+        args.num_gpus = config.perf.gpus
 
         args.cudnn_benchmark = True
         if config.perf.nobench:
@@ -360,6 +374,11 @@ class BaseTrainer:
         if config.perf.allow_tf32:
             args.allow_tf32 = True
 
+
+        # -------------------------------------------------
+        # End of setuping arguments
+        # -------------------------------------------------
+
         args = to_easy_dict(args)
         self.run_desc = desc
         self.args = args
@@ -368,6 +387,9 @@ class BaseTrainer:
     
     
     def setup_logs(self):
+        if self.rank == 0:
+            print('Setting up logs...')
+
         dnnlib.util.Logger(should_flush=True)
         
         # Pick output directory.
@@ -398,8 +420,8 @@ class BaseTrainer:
         if self.config.exp.dry_run:
             return
         
+        # Create output directory and save args.
         if self.rank == 0 and self.config.trans.resume != 'from_data':
-            # Create output directory.
             print('Creating output directory...')
             os.makedirs(self.args.run_dir)
 
@@ -410,6 +432,8 @@ class BaseTrainer:
 
             dnnlib.util.Logger(file_name=os.path.join(self.args.run_dir, 'log.txt'), file_mode='a', should_flush=True)
         
+
+        # Init wandb logging
         if self.args.use_wandb:
             if self.config.trans.resume == 'noresume':
                 wandb_id = wandb.util.generate_id()
@@ -422,7 +446,7 @@ class BaseTrainer:
         
         # Initialize logs.
         if self.rank == 0:
-            print('Initializing logs...')
+            print('Initializing logs')
         self.stats_collector = training_stats.Collector(regex='.*')
         self.stats_metrics = dict()
         self.stats_jsonl = None
@@ -437,6 +461,9 @@ class BaseTrainer:
 
     def distribute_torch(self, temp_dir):
         if self.args.num_gpus > 1:
+            if self.rank == 1:
+                print('Distributing torch across gpus')
+
             init_file = os.path.abspath(os.path.join(temp_dir, '.torch_distributed_init'))
             if os.name == 'nt':
                 init_method = 'file:///' + init_file.replace('\\', '/')
@@ -453,18 +480,20 @@ class BaseTrainer:
         
     
     def init_params(self):
-        # Initialize.
+        if self.rank == 0:
+            print('Initializing parameters')
+
         self.wandb_step = self.args.start_options['wandb_step']
         self.start_time = time.time()
         self.device = torch.device('cuda', self.rank)
         self.metrics_time = 0
         np.random.seed(self.args.random_seed * self.args.num_gpus + self.rank)
         torch.manual_seed(self.args.random_seed * self.args.num_gpus + self.rank)
-        torch.backends.cudnn.benchmark = self.args.cudnn_benchmark              # Improves training speed.
-        torch.backends.cuda.matmul.allow_tf32 = self.args.allow_tf32  # Allow PyTorch to internally use tf32 for matmul
-        torch.backends.cudnn.allow_tf32 = self.args.allow_tf32        # Allow PyTorch to internally use tf32 for convolutions
-        conv2d_gradfix.enabled = True                                 # Improves training speed.
-        grid_sample_gradfix.enabled = True                            # Avoids errors with the augmentation pipe.
+        torch.backends.cudnn.benchmark = self.args.cudnn_benchmark               # Improves training speed.
+        torch.backends.cuda.matmul.allow_tf32 = self.args.allow_tf32             # Allow PyTorch to internally use tf32 for matmul
+        torch.backends.cudnn.allow_tf32 = self.args.allow_tf32                   # Allow PyTorch to internally use tf32 for convolutions
+        conv2d_gradfix.enabled = True                                            # Improves training speed.
+        grid_sample_gradfix.enabled = True                                       # Avoids errors with the augmentation pipe.
         
         
         
@@ -485,7 +514,6 @@ class BaseTrainer:
     
     
     def setup_networks(self):
-        # Construct networks.
         if self.rank == 0:
             print('Constructing networks...')
 
@@ -512,11 +540,11 @@ class BaseTrainer:
                 img = misc.print_module_summary(self.G, [z, c])
                 misc.print_module_summary(self.D, [img, c])
         except:
-            print('Cant print model summary')
+            if self.rank == 0:
+                print('Cant print model summary')
             
             
     def setup_augmentations(self):
-        # Setup augmentation.
         if self.rank == 0:
             print('Setting up augmentation...')
         self.augment_pipe = None
@@ -664,7 +692,6 @@ class BaseTrainer:
                 all_gen_c = [phase_gen_c.split(self.args.batch_gpu) for phase_gen_c in all_gen_c.split(self.args.batch_size)]
 
             # Execute training phases.
-           # losses = defaultdict(list)
             for phase_idx, (phase, phase_gen_z, phase_gen_c) in enumerate(zip(self.phases, all_gen_z, all_gen_c)):
                 if batch_idx % phase.interval != 0:
                     continue
@@ -720,12 +747,12 @@ class BaseTrainer:
 
             # Print status line, accumulating the same information in stats_collector.
             tick_end_time = time.time()
-            fields = []
-            fields += [f"tick {training_stats.report0('Progress/tick', cur_tick):<5d}"]
-            fields += [f"kimg {training_stats.report0('Progress/kimg', cur_nimg / 1e3):<8.1f}"]
             sec_per_kimg = (tick_end_time - tick_start_time) / (cur_nimg - tick_start_nimg) * 1e3
             sec_per_tick = tick_end_time - tick_start_time
             snapshots_left = int((self.args.total_kimg - cur_nimg / 1000) / self.args.kimg_per_tick) // self.args.image_snapshot_ticks + 1
+            fields = []
+            fields += [f"tick {training_stats.report0('Progress/tick', cur_tick):<5d}"]
+            fields += [f"kimg {training_stats.report0('Progress/kimg', cur_nimg / 1e3):<8.1f}"]
             fields += [f"time {dnnlib.util.format_time(training_stats.report0('Timing/total_sec', tick_end_time - self.start_time)):<12s}"]
             fields += [f"time left {dnnlib.util.format_time(int((self.args.total_kimg - cur_nimg / 1000) * sec_per_kimg) + snapshots_left * self.metrics_time):<12s}"]
             fields += [f"sec/tick {training_stats.report0('Timing/sec_per_tick', sec_per_tick):<7.1f}"]
