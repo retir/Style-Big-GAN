@@ -130,7 +130,7 @@ def to_easy_dict(obj):
     try:
         items = obj.items()
     except:
-        if type(obj) == omegaconf.listconfig.ListConfig:
+        if type(obj) == omegaconf.listconfig.ListConfig or type(obj) == list:
             list_of_items = []
             for item in obj:
                 list_of_items.append(to_easy_dict(item))
@@ -156,9 +156,8 @@ class BaseTrainer:
         
         if config.trans.resume == 'from_data':
             with open(os.path.join(config.trans.resume_dir, config.trans.args_name)) as json_data:
-                args = dnnlib.EasyDict(json.load(json_data))
+                args = to_easy_dict(json.load(json_data))
             args.resume_params = dnnlib.EasyDict(config.trans)
-            self.desc = args.desc
             self.args = args
             return
         
@@ -259,8 +258,11 @@ class BaseTrainer:
         # Regularization options
         # -----------------------------------
 
-        self.gen_regs_all = self.config.gen_regs_all
-        self.disc_regs_all = self.config.disc_regs_all
+        gen_regs_all = self.config.gen_regs_all
+        disc_regs_all = self.config.disc_regs_all
+        args.gen_regs = [[key, gen_regs_all[key]] for key in args.names.gen_regs]
+        args.dis_regs = [[key, disc_regs_all[key]] for key in args.names.disc_regs]
+
         args.D_reg_interval = config.gen.d_reg_interval
         args.G_reg_interval = config.gen.g_reg_interval
         
@@ -339,6 +341,7 @@ class BaseTrainer:
         }
 
         args.resume_pkl = None
+        args.resume_params = None
         args.ada_kimg = 500
         if config.trans.resume == 'noresume':
             desc += '-noresume'
@@ -380,8 +383,8 @@ class BaseTrainer:
         # -------------------------------------------------
 
         args = to_easy_dict(args)
-        self.run_desc = desc
-        self.args = args
+        args.desc = desc
+        self.args = to_easy_dict(args)
 
 #----------------------------------------------------------------------------
     
@@ -393,14 +396,15 @@ class BaseTrainer:
         dnnlib.util.Logger(should_flush=True)
         
         # Pick output directory.
-        prev_run_dirs = []
-        if os.path.isdir(self.config.log.output): # outdir
-            prev_run_dirs = [x for x in os.listdir(self.config.log.output) if os.path.isdir(os.path.join(self.config.log.output, x))]
-        prev_run_ids = [re.match(r'^\d+', x) for x in prev_run_dirs]
-        prev_run_ids = [int(x.group()) for x in prev_run_ids if x is not None]
-        cur_run_id = max(prev_run_ids, default=-1) + 1
-        self.args.run_dir = os.path.join(self.config.log.output, f'{cur_run_id:05d}-{self.run_desc}')
-        assert not os.path.exists(self.args.run_dir)
+        if self.config.trans.resume != 'from_data':
+            prev_run_dirs = []
+            if os.path.isdir(self.config.log.output): # outdir
+                prev_run_dirs = [x for x in os.listdir(self.config.log.output) if os.path.isdir(os.path.join(self.config.log.output, x))]
+            prev_run_ids = [re.match(r'^\d+', x) for x in prev_run_dirs]
+            prev_run_ids = [int(x.group()) for x in prev_run_ids if x is not None]
+            cur_run_id = max(prev_run_ids, default=-1) + 1
+            self.args.run_dir = os.path.join(self.config.log.output, f'{cur_run_id:05d}-{self.args.desc}')
+            assert not os.path.exists(self.args.run_dir)
         
         if self.rank == 0:
             print()
@@ -421,7 +425,7 @@ class BaseTrainer:
             return
         
         # Create output directory and save args.
-        if self.rank == 0 and self.config.trans.resume != 'from_data':
+        if self.rank == 0 and self.config.trans.resume == 'noresume':
             print('Creating output directory...')
             os.makedirs(self.args.run_dir)
 
@@ -531,6 +535,15 @@ class BaseTrainer:
                 resume_data = legacy.load_network_pkl(f)
             for name, module in [('G', self.G), ('D', self.D)]:
                 misc.copy_params_and_buffers(resume_data[name], module, require_all=False)
+
+        elif (self.args.resume_params is not None) and (self.rank == 0):
+            model_path = os.path.join(self.args.resume_params.resume_dir, self.args.resume_params.resume_model)
+            print(f'Resuming from "{model_path}"')
+            with dnnlib.util.open_url(model_path) as f:
+                resume_data = legacy.load_network_pkl(f)
+            for name, module in [('G', self.G), ('D', self.D), ('G_ema', self.G_ema)]:
+                if module is not None:
+                    misc.copy_params_and_buffers(resume_data[name], module, require_all=False)
                 
         # Print network summary tables.
         try:
@@ -575,8 +588,8 @@ class BaseTrainer:
             print('Setting up training phases...')
         self.loss = losses_arch[self.args.names.loss_arch](device=self.device,
                                                        loss=self.args.names.loss,
-                                                       gen_regs = [(key, self.gen_regs_all[key]) for key in self.args.names.gen_regs],
-                                                       dis_regs = [(key, self.disc_regs_all[key]) for key in self.args.names.disc_regs],
+                                                       gen_regs = self.args.gen_regs,
+                                                       dis_regs = self.args.dis_regs,
                                                        **self.ddp_modules,
                                                        **self.args.loss_kwargs)
 

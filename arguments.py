@@ -103,6 +103,10 @@ class TransferLearning:
     resume: str = 'noresume'
     resume_url: str = ''
     freezed: int = -1
+    resume_model: str = ''
+    resume_dir: str = ''
+    args_name: str = 'training_options.json'
+    
         
 DatasetArgs = datasets_args.make_dataclass_from_args("DatasetArgs")
 args.add_to_registry("datasets_args")(DatasetArgs)
