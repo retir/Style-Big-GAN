@@ -97,7 +97,7 @@ def compute_ppl(opts, num_samples, epsilon, space, sampling, crop, batch_size, j
     dataset = datasets[dataset_name](**opts.dataset_kwargs)
 
     vgg16_url = 'https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/metrics/vgg16.pt'
-    vgg16_url = './vgg16.pt'
+    #vgg16_url = './vgg16.pt' # for local use
     vgg16 = metric_utils.get_feature_detector(vgg16_url, num_gpus=opts.num_gpus, rank=opts.rank, verbose=opts.progress.verbose)
 
     # Setup sampler.

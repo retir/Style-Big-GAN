@@ -147,14 +147,11 @@ def to_easy_dict(obj):
 
 @trainers.add_to_registry("base")
 class BaseTrainer:
-    def __init__(self, config=0):
+    def __init__(self):
         pass
-        #self.config = config
     
     
     def setup_arguments(self, config):
-        #config = self.config
-        
         if config.trans.resume == 'from_data':
             with open(os.path.join(config.trans.resume_dir, config.trans.args_name)) as json_data:
                 args = to_easy_dict(json.load(json_data))
@@ -191,7 +188,7 @@ class BaseTrainer:
 
         args.n_dis = config.gen.n_dis
         args.random_seed = config.gen.seed
-        args.total_kimg = config.gen.kimg  # проверить батч и гпу батч на делимость
+        args.total_kimg = config.gen.kimg 
         args.batch_size = config.gen.batch  # spec.mb
         args.batch_gpu = config.gen.batch_gpu  # spec.mb // spec.ref_gpus
         args.progress_fn = None 
@@ -201,6 +198,9 @@ class BaseTrainer:
 
         if args.batch_size % args.batch_gpu != 0:
             raise UserError(f'batch_gpu should devide batch')
+        
+        if args.batch_size % (args.batch_gpu * config.perf.gpus) != 0:
+            raise UserError(f'batch size should be divisible by (batch_gpu * gpus_cnt)')
         
 
         # ------------------------------------------
@@ -227,7 +227,6 @@ class BaseTrainer:
         # Dataset options
         # -----------------------------------
 
-        args.dataset = config.data.dataset # Убрать
         args.training_set_kwargs = dnnlib.EasyDict(path=config.data.dataset_path, **config.datasets_args[config.data.dataset])
         args.data_loader_kwargs = dnnlib.EasyDict(**config.dataloaders_args[config.data.dataloader])
 
@@ -404,7 +403,6 @@ class BaseTrainer:
         dnnlib.util.Logger(should_flush=True)
         
         # Pick output directory.
-        #if self.config.trans.resume != 'from_data':
         if self.args.resume != 'from_data' and self.rank == 0:
             prev_run_dirs = []
             if os.path.isdir(self.args.output): # outdir
@@ -434,7 +432,6 @@ class BaseTrainer:
             return
         
         # Create output directory and save args.
-        #if self.rank == 0 and self.config.trans.resume == 'noresume':
         if self.rank == 0 and self.args.resume == 'noresume':
             print('Creating output directory...')
             os.makedirs(self.args.run_dir)
@@ -450,8 +447,6 @@ class BaseTrainer:
         # Init wandb logging
         if self.args.use_wandb and self.rank == 0:
             print('Login in wandb')
-            wandb.login(key='2431513373277007bbe841fb3d8614eab0342da9')
-            #if self.config.trans.resume == 'noresume':
             if self.args.resume == 'noresume':
                 print('Creating wandb project')
                 wandb_id = wandb.util.generate_id()
@@ -462,6 +457,7 @@ class BaseTrainer:
             else:
                 print('Initializing wandb project')
                 wandb.init(id=self.args.wandb_id, resume=True, project=self.args.wandb_project, entity="retir")
+        
         
         # Initialize logs.
         if self.rank == 0:
@@ -549,8 +545,9 @@ class BaseTrainer:
             print(f'Resuming from "{self.args.resume_pkl}"')
             with dnnlib.util.open_url(self.args.resume_pkl) as f:
                 resume_data = legacy.load_network_pkl(f)
-            for name, module in [('G', self.G), ('D', self.D)]:
-                misc.copy_params_and_buffers(resume_data[name], module, require_all=False)
+            for name, module in [('G', self.G), ('D', self.D), ('G_ema', G_ema)]:
+                if module is not None:
+                    misc.copy_params_and_buffers(resume_data[name], module, require_all=False)
 
         elif (self.args.resume_params is not None): # тут было rank == 0
             model_path = os.path.join(self.args.resume_params.resume_dir, self.args.resume_params.resume_model)
@@ -562,14 +559,13 @@ class BaseTrainer:
                     misc.copy_params_and_buffers(resume_data[name], module, require_all=False)
                 
         # Print network summary tables.
-        try:
-            if self.rank == 0:
+        if self.rank == 0:
+            try:
                 z = torch.empty([self.args.batch_gpu, self.G.z_dim], device=self.device)
                 c = torch.empty([self.args.batch_gpu, self.G.c_dim], device=self.device)
                 img = misc.print_module_summary(self.G, [z, c])
                 misc.print_module_summary(self.D, [img, c])
-        except:
-            if self.rank == 0:
+            except:
                 print('Cant print model summary')
             
             
@@ -613,7 +609,8 @@ class BaseTrainer:
         intervals['G'] = self.args.n_dis         
         
         self.phases = []
-        for name, module, opt_kwargs, reg_interval, opt_name in [('G', self.G, self.args.G_opt_kwargs, self.args.G_reg_interval, self.args.names.optim_gen), ('D', self.D, self.args.D_opt_kwargs, self.args.D_reg_interval, self.args.names.optim_disc)]:
+        for name, module, opt_kwargs, reg_interval, opt_name in [('G', self.G, self.args.G_opt_kwargs, self.args.G_reg_interval, self.args.names.optim_gen), 
+                                                                 ('D', self.D, self.args.D_opt_kwargs, self.args.D_reg_interval, self.args.names.optim_disc)]:
             if reg_interval <= 0:
                 self.opt = optimizers[opt_name](params=module.parameters(), **opt_kwargs)
                 self.phases += [dnnlib.EasyDict(name=name+'both', module=module, opt=self.opt, interval=intervals[name])]
@@ -634,27 +631,17 @@ class BaseTrainer:
                 
                 
     def save_snapshot(self, cur_nimg):
-        #print('snap', self.rank)
         snapshot_pkl = None
         snapshot_data = None
         snapshot_data = dict(training_set_kwargs=dict(self.args.training_set_kwargs))
         for name, module in [('G', self.G), ('D', self.D), ('G_ema', self.G_ema), ('augment_pipe', self.augment_pipe)]:
             try: 
                 if module is not None:
-                    #print(name, self.rank)
-                    if self.args.num_gpus > 1 and name == 'G': # Исправлено
+                    if self.args.num_gpus > 1 and name == 'G':
                         misc.check_ddp_consistency(module, ignore_regex=r'.*\.w_avg')
-                    #if self.rank == 0 and name == 'G_ema':
-                    #    print('Start copy')
                     module = copy.deepcopy(module).eval().requires_grad_(False).cpu()
-                   # if self.rank == 0 and name == 'G_ema':
-                    #    print('End copy')
                 snapshot_data[name] = module
-                del module # conserve memory\
-                #if self.rank == 1 and name == 'D':
-                #    print('Start_sleep')
-                #    time.sleep(5)
-                #    print('Wake_up')
+                del module # conserve memory
             except:
                 if self.rank == 0:
                     print(f'Cannot deepcopy module {name}, skip')
@@ -662,18 +649,11 @@ class BaseTrainer:
             snapshot_pkl = os.path.join(self.args.run_dir, f'network-snapshot-{cur_nimg//1000:06d}.pkl')
             with open(snapshot_pkl, 'wb') as f:
                 pickle.dump(snapshot_data, f)
-        #if self.rank > 0:
-        #    print('Start_sleep')
-        #    time.sleep(10)
-        #    print('Wake_up')
-        #print('end snap', self.rank)
-        #misc.check_ddp_consistency(self.G, ignore_regex=r'.*\.w_avg')
-        #print('contuinue', self.rank)
+
         return snapshot_data, snapshot_pkl
     
     
     def evaluate_metrics(self, snapshot_data, snapshot_pkl):
-        #print('metric', self.rank)
         if self.rank == 0:
             print('Evaluating metrics...')
         self.metrics_time = 0
