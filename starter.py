@@ -14,10 +14,10 @@ def main():
     config = arguments.load_config()
     print('Config loaded')
     
-    trainer = trainers[config.exp.trainer](config)
-    trainer.setup_arguments()
+    trainer = trainers[config.exp.trainer]()
+    trainer.setup_arguments(config)
     
-    if trainer.config.exp.dry_run:
+    if config.exp.dry_run:
         print('Dry run; exiting.')
         return
     
@@ -27,7 +27,7 @@ def main():
         if config.perf.gpus == 1:
             multiprocesses_main(rank=0, trainer=trainer, temp_dir=temp_dir)
         else:
-            torch.multiprocessing.spawn(fn=multiprocesses_main, args=(trainer, temp_dir), nprocs=config.num_gpus)
+            torch.multiprocessing.spawn(fn=multiprocesses_main, args=(trainer, temp_dir), nprocs=config.perf.gpus)
 
 def multiprocesses_main(rank, trainer, temp_dir):
     trainer.rank = rank

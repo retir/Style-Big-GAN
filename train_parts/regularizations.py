@@ -1,5 +1,6 @@
 import utils
 import torch
+import numpy as np
 from stylegan2ada.torch_utils.ops import conv2d_gradfix
 from stylegan2ada.torch_utils import training_stats
 

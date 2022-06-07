@@ -147,17 +147,19 @@ def to_easy_dict(obj):
 
 @trainers.add_to_registry("base")
 class BaseTrainer:
-    def __init__(self, config):
-        self.config = config
+    def __init__(self, config=0):
+        pass
+        #self.config = config
     
     
-    def setup_arguments(self):
-        config = self.config
+    def setup_arguments(self, config):
+        #config = self.config
         
         if config.trans.resume == 'from_data':
             with open(os.path.join(config.trans.resume_dir, config.trans.args_name)) as json_data:
                 args = to_easy_dict(json.load(json_data))
             args.resume_params = dnnlib.EasyDict(config.trans)
+            args.resume = 'from_data'
             self.args = args
             return
         
@@ -175,25 +177,27 @@ class BaseTrainer:
         'wandb_step' : 0})
 
         args.names = dnnlib.EasyDict()
-        args.names.dataset = self.config.data.dataset
-        args.names.dataloader = self.config.data.dataloader
-        args.names.generator = self.config.gen.generator
-        args.names.discriminator = self.config.gen.discriminator
-        args.names.optim_gen = self.config.gen.optim_gen
-        args.names.optim_disc = self.config.gen.optim_disc
-        args.names.gen_regs = self.config.gen.gen_regs
-        args.names.disc_regs = self.config.gen.disc_regs
-        args.names.loss_arch = self.config.gen.loss_arch
-        args.names.loss = self.config.gen.loss
-        args.names.aug_type = self.config.aug.aug_type
+        args.names.dataset = config.data.dataset
+        args.names.dataloader = config.data.dataloader
+        args.names.generator = config.gen.generator
+        args.names.discriminator = config.gen.discriminator
+        args.names.optim_gen = config.gen.optim_gen
+        args.names.optim_disc = config.gen.optim_disc
+        args.names.gen_regs = config.gen.gen_regs
+        args.names.disc_regs = config.gen.disc_regs
+        args.names.loss_arch = config.gen.loss_arch
+        args.names.loss = config.gen.loss
+        args.names.aug_type = config.aug.aug_type
 
-        args.n_dis = self.config.gen.n_dis
+        args.n_dis = config.gen.n_dis
         args.random_seed = config.gen.seed
         args.total_kimg = config.gen.kimg  # проверить батч и гпу батч на делимость
         args.batch_size = config.gen.batch  # spec.mb
         args.batch_gpu = config.gen.batch_gpu  # spec.mb // spec.ref_gpus
         args.progress_fn = None 
         args.abort_fn = None
+        args.dry_run = config.exp.dry_run
+        
 
         if args.batch_size % args.batch_gpu != 0:
             raise UserError(f'batch_gpu should devide batch')
@@ -210,10 +214,13 @@ class BaseTrainer:
         if not all(metric_main.is_valid_metric(metric) for metric in config.log.metrics):
             raise UserError('\n'.join(['--metrics can only contain the following values:'] + metric_main.list_valid_metrics()))
         args.metrics = list(config.log.metrics)
-
-        args.use_wandb = self.config.log.wandb
+        
+        args.output = config.log.output
+        args.use_wandb = config.log.wandb
         args.network_snapshot_ticks = config.log.snap
-        args.kimg_per_tick = self.config.log.kimg_per_tick
+        args.kimg_per_tick = config.log.kimg_per_tick
+        args.exp_name = config.exp.name
+        args.project = config.exp.project
 
 
         # -----------------------------------
@@ -258,8 +265,8 @@ class BaseTrainer:
         # Regularization options
         # -----------------------------------
 
-        gen_regs_all = self.config.gen_regs_all
-        disc_regs_all = self.config.disc_regs_all
+        gen_regs_all = config.gen_regs_all
+        disc_regs_all = config.disc_regs_all
         args.gen_regs = [[key, gen_regs_all[key]] for key in args.names.gen_regs]
         args.dis_regs = [[key, disc_regs_all[key]] for key in args.names.disc_regs]
 
@@ -281,7 +288,7 @@ class BaseTrainer:
 
         args.ema_kimg = config.ema.kimg  # spec.ema
         args.ema_rampup = config.ema.ramp if config.ema.ramp != -1 else None # spec.ramp
-        args.use_ema = self.config.ema.use_ema
+        args.use_ema = config.ema.use_ema
 
 
         # ---------------------------------------------------
@@ -343,6 +350,7 @@ class BaseTrainer:
         args.resume_pkl = None
         args.resume_params = None
         args.ada_kimg = 500
+        args.resume = config.trans.resume
         if config.trans.resume == 'noresume':
             desc += '-noresume'
         elif config.trans.resume in resume_specs:
@@ -396,14 +404,15 @@ class BaseTrainer:
         dnnlib.util.Logger(should_flush=True)
         
         # Pick output directory.
-        if self.config.trans.resume != 'from_data':
+        #if self.config.trans.resume != 'from_data':
+        if self.args.resume != 'from_data' and self.rank == 0:
             prev_run_dirs = []
-            if os.path.isdir(self.config.log.output): # outdir
-                prev_run_dirs = [x for x in os.listdir(self.config.log.output) if os.path.isdir(os.path.join(self.config.log.output, x))]
+            if os.path.isdir(self.args.output): # outdir
+                prev_run_dirs = [x for x in os.listdir(self.args.output) if os.path.isdir(os.path.join(self.args.output, x))]
             prev_run_ids = [re.match(r'^\d+', x) for x in prev_run_dirs]
             prev_run_ids = [int(x.group()) for x in prev_run_ids if x is not None]
             cur_run_id = max(prev_run_ids, default=-1) + 1
-            self.args.run_dir = os.path.join(self.config.log.output, f'{cur_run_id:05d}-{self.args.desc}')
+            self.args.run_dir = os.path.join(self.args.output, f'{cur_run_id:05d}-{self.args.exp_name}')
             assert not os.path.exists(self.args.run_dir)
         
         if self.rank == 0:
@@ -421,11 +430,12 @@ class BaseTrainer:
             print(f'Dataset x-flips:    {self.args.training_set_kwargs.xflip}')
             print()
         
-        if self.config.exp.dry_run:
+        if self.args.dry_run:
             return
         
         # Create output directory and save args.
-        if self.rank == 0 and self.config.trans.resume == 'noresume':
+        #if self.rank == 0 and self.config.trans.resume == 'noresume':
+        if self.rank == 0 and self.args.resume == 'noresume':
             print('Creating output directory...')
             os.makedirs(self.args.run_dir)
 
@@ -438,14 +448,19 @@ class BaseTrainer:
         
 
         # Init wandb logging
-        if self.args.use_wandb:
-            if self.config.trans.resume == 'noresume':
+        if self.args.use_wandb and self.rank == 0:
+            print('Login in wandb')
+            wandb.login(key='2431513373277007bbe841fb3d8614eab0342da9')
+            #if self.config.trans.resume == 'noresume':
+            if self.args.resume == 'noresume':
+                print('Creating wandb project')
                 wandb_id = wandb.util.generate_id()
                 self.args.wandb_id = wandb_id
-                self.args.wandb_project = self.config.exp.project
-                wandb.init(id=wandb_id, resume='allow', project=self.config.exp.project, entity="retir", name=self.config.exp.name)
+                self.args.wandb_project = self.args.project
+                wandb.init(id=wandb_id, resume='allow', project=self.args.project, entity="retir", name=self.args.exp_name)
                 wandb.config = self.args
             else:
+                print('Initializing wandb project')
                 wandb.init(id=self.args.wandb_id, resume=True, project=self.args.wandb_project, entity="retir")
         
         # Initialize logs.
@@ -455,17 +470,18 @@ class BaseTrainer:
         self.stats_metrics = dict()
         self.stats_jsonl = None
         self.stats_tfevents = None
-        self.stats_jsonl = open(os.path.join(self.args.run_dir, 'stats.jsonl'), 'wt')
-        try:
-            import torch.utils.tensorboard as tensorboard
-            self.stats_tfevents = tensorboard.SummaryWriter(self.args.run_dir)
-        except ImportError as err:
-            print('Skipping tfevents export:', err)
+        if self.rank == 0:
+          self.stats_jsonl = open(os.path.join(self.args.run_dir, 'stats.jsonl'), 'wt')
+          try:
+              import torch.utils.tensorboard as tensorboard
+              self.stats_tfevents = tensorboard.SummaryWriter(self.args.run_dir)
+          except ImportError as err:
+              print('Skipping tfevents export:', err)
 
 
     def distribute_torch(self, temp_dir):
         if self.args.num_gpus > 1:
-            if self.rank == 1:
+            if self.rank == 0:
                 print('Distributing torch across gpus')
 
             init_file = os.path.abspath(os.path.join(temp_dir, '.torch_distributed_init'))
@@ -536,9 +552,9 @@ class BaseTrainer:
             for name, module in [('G', self.G), ('D', self.D)]:
                 misc.copy_params_and_buffers(resume_data[name], module, require_all=False)
 
-        elif (self.args.resume_params is not None) and (self.rank == 0):
+        elif (self.args.resume_params is not None): # тут было rank == 0
             model_path = os.path.join(self.args.resume_params.resume_dir, self.args.resume_params.resume_model)
-            print(f'Resuming from "{model_path}"')
+            print(f'Resuming from local "{model_path}"')
             with dnnlib.util.open_url(model_path) as f:
                 resume_data = legacy.load_network_pkl(f)
             for name, module in [('G', self.G), ('D', self.D), ('G_ema', self.G_ema)]:
@@ -618,28 +634,46 @@ class BaseTrainer:
                 
                 
     def save_snapshot(self, cur_nimg):
+        #print('snap', self.rank)
         snapshot_pkl = None
         snapshot_data = None
         snapshot_data = dict(training_set_kwargs=dict(self.args.training_set_kwargs))
         for name, module in [('G', self.G), ('D', self.D), ('G_ema', self.G_ema), ('augment_pipe', self.augment_pipe)]:
             try: 
                 if module is not None:
-                    if self.args.num_gpus > 1:
+                    #print(name, self.rank)
+                    if self.args.num_gpus > 1 and name == 'G': # Исправлено
                         misc.check_ddp_consistency(module, ignore_regex=r'.*\.w_avg')
+                    #if self.rank == 0 and name == 'G_ema':
+                    #    print('Start copy')
                     module = copy.deepcopy(module).eval().requires_grad_(False).cpu()
+                   # if self.rank == 0 and name == 'G_ema':
+                    #    print('End copy')
                 snapshot_data[name] = module
-                del module # conserve memory
+                del module # conserve memory\
+                #if self.rank == 1 and name == 'D':
+                #    print('Start_sleep')
+                #    time.sleep(5)
+                #    print('Wake_up')
             except:
                 if self.rank == 0:
                     print(f'Cannot deepcopy module {name}, skip')
-        snapshot_pkl = os.path.join(self.args.run_dir, f'network-snapshot-{cur_nimg//1000:06d}.pkl')
         if self.rank == 0:
+            snapshot_pkl = os.path.join(self.args.run_dir, f'network-snapshot-{cur_nimg//1000:06d}.pkl')
             with open(snapshot_pkl, 'wb') as f:
                 pickle.dump(snapshot_data, f)
+        #if self.rank > 0:
+        #    print('Start_sleep')
+        #    time.sleep(10)
+        #    print('Wake_up')
+        #print('end snap', self.rank)
+        #misc.check_ddp_consistency(self.G, ignore_regex=r'.*\.w_avg')
+        #print('contuinue', self.rank)
         return snapshot_data, snapshot_pkl
     
     
     def evaluate_metrics(self, snapshot_data, snapshot_pkl):
+        #print('metric', self.rank)
         if self.rank == 0:
             print('Evaluating metrics...')
         self.metrics_time = 0
@@ -647,7 +681,7 @@ class BaseTrainer:
             result_dict = metric_main.calc_metric(metric=metric, dataset_name=self.args.names.dataset, G=(snapshot_data['G_ema'] if self.args.use_ema else snapshot_data['G']),
                 dataset_kwargs=self.args.training_set_kwargs, num_gpus=self.args.num_gpus, rank=self.rank, device=self.device)
             self.metrics_time += result_dict['total_time']
-            if self.args.use_wandb:
+            if self.args.use_wandb and self.rank == 0:
                 if metric == 'fid50k_full':
                     wandb.log({'FID': result_dict['results']['fid50k_full']}, step=self.wandb_step, commit=False)
                 if metric == 'is50k':
@@ -830,7 +864,7 @@ class BaseTrainer:
             stats_dict = self.stats_collector.as_dict()
 
             # Update logs.
-            if self.args.use_wandb:
+            if self.args.use_wandb and self.rank == 0:
                 wandb.log({key: value['mean'] for key, value in stats_dict.items()}, step=self.wandb_step)
             self.wandb_step += 1
 

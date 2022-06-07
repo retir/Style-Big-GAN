@@ -3,8 +3,9 @@ exp:
 
 
 gen:
-    kimg: 20000
+    kimg: 13000
     batch: 64
+    batch_gpu: 64
     disc_regs: ['r1']
 
 
@@ -28,6 +29,7 @@ gens_args:
         w_dim: 512
         mapping_kwargs:
             num_layers : 2
+        attentions: [32, 16, 8, 4]
 
         
 discs_args:
@@ -35,6 +37,7 @@ discs_args:
         epilogue_kwargs:
             mbstd_group_size : 32
         architecture: "orig"
+        attentions: [32]
 
     
 optim_gen_args:
@@ -62,3 +65,5 @@ disc_regs_all:
         r1_gamma: 0.01
     
         
+aug:
+    aug: 'noaug'

@@ -1,0 +1,66 @@
+exp:
+    trainer: 'sg2'
+
+
+gen:
+    kimg: 13000
+    batch: 64
+    batch_gpu: 32
+    disc_regs: ['r1']
+    gen_regs: ['ppl']
+
+
+log:
+    output: ./logs
+
+
+data:
+    dataset_path: ./data/thumbnails128x128.zip
+
+
+datasets_args:
+    image_folder:
+        use_labels: True
+        max_size: 70000
+
+        
+gens_args:
+    sg2_classic:
+        z_dim: 512
+        w_dim: 512
+        mapping_kwargs:
+            num_layers : 6
+        synthesis_kwargs:
+            channel_base: 16384
+        attentions: []
+
+        
+discs_args:
+    sg2_classic:
+        epilogue_kwargs:
+            mbstd_group_size : 8
+        attentions: []
+        channel_base: 16384
+
+    
+optim_gen_args:
+    adam:
+        lr: 0.0025
+
+    
+optim_disc_args:
+    adam:
+        lr: 0.0025
+
+
+ema:
+    kimg: 20
+        
+    
+disc_regs_all:
+    r1:
+        r1_gamma: 1
+    
+        
+aug:
+    aug: 'noaug'

@@ -380,6 +380,10 @@ class SynthesisBlock(torch.nn.Module):
                 resample_filter=resample_filter, conv_clamp=conv_clamp, channels_last=self.channels_last, **layer_kwargs)
             self.num_conv += 1
 
+        #self.conv0_5 = SynthesisLayer(out_channels, out_channels, w_dim=w_dim, resolution=resolution, # DEL
+        #    conv_clamp=conv_clamp, channels_last=self.channels_last, **layer_kwargs)
+        #self.num_conv += 1
+        
         self.conv1 = SynthesisLayer(out_channels, out_channels, w_dim=w_dim, resolution=resolution,
             conv_clamp=conv_clamp, channels_last=self.channels_last, **layer_kwargs)
         self.num_conv += 1
@@ -412,14 +416,17 @@ class SynthesisBlock(torch.nn.Module):
 
         # Main layers.
         if self.in_channels == 0:
+            #x = self.conv0_5(x, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs) # DEL
             x = self.conv1(x, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs)
         elif self.architecture == 'resnet':
             y = self.skip(x, gain=np.sqrt(0.5))
             x = self.conv0(x, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs)
+            #x = self.conv0_5(x, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs) # DEL
             x = self.conv1(x, next(w_iter), fused_modconv=fused_modconv, gain=np.sqrt(0.5), **layer_kwargs)
             x = y.add_(x)
         else:
             x = self.conv0(x, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs)
+            #x = self.conv0_5(x, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs) # DEL
             x = self.conv1(x, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs)
 
         if self.attention:
