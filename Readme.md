@@ -30,7 +30,7 @@ To train network you should run following command:
 Starter use a omegaconf package, so it is very convinient to change some of the parametrs without changin config. For example, if you want to change batch size, you can add ```gen.batch=50``` to the command line.
 
 ## Adding new parts
-For example, you want to add new generator architecture. You need to add class of this architecture in ```training_parts/generators.py``` and decorate it by ```@generators.add_to_registry("name")```, where "name" will be used in config for this generator. Then you need to add a dataclass with arguments for your generator in ```training_parts/gens_and_discs_args.py``` and decorate it by ```@gens_args.add_to_registry("name")```, where "name" should be the same as in ```genereators.py```.
+For example, you want to add new generator architecture. You need to add class of this architecture in ```training_parts/generators.py``` and decorate it by ```@generators.add_to_registry("name")```, where "name" will be used as key in config for this generator. 
 
 Similarly with other training parts.
     
