@@ -43,11 +43,13 @@ discs_args:
 optim_gen_args:
     adam:
         lr: 0.0025
+        betas: [0, 0.99]
 
     
 optim_disc_args:
     adam:
         lr: 0.0025
+        betas: [0, 0.99]
 
 
 ema:

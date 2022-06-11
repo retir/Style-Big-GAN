@@ -4,13 +4,14 @@ from dataclasses import dataclass, field
 from omegaconf import OmegaConf, MISSING
 import utils
 
-from train_parts_args.augmentaions_agrs import augpipe_specs
-from train_parts_args.datasets_args import datasets_args, dataloaders_args
-from train_parts_args.gens_and_discs_args import gens_args, discs_args
-from train_parts_args.losses_arch_args import losses_arch_args
-from train_parts_args.optim_args import optim_gen_args, optim_disc_args
-from train_parts_args.regs_args import gen_regs_args, disc_regs_args
-
+from train_parts.datasets import datasets
+from train_parts.generators import generators
+from train_parts.discriminators import discriminators
+from train_parts.losses_base import losses_arch
+from train_parts.augmentations import augmentations
+from train_parts.regularizations import discriminator_regs, generator_regs
+from train_parts.dataloaders import dataloaders
+from train_parts.optimizers import optimizers
 
 args = utils.ClassRegistry()
 
@@ -108,34 +109,34 @@ class TransferLearning:
     args_name: str = 'training_options.json'
     
         
-DatasetArgs = datasets_args.make_dataclass_from_args("DatasetArgs")
+DatasetArgs = datasets.make_dataclass_from_args("DatasetArgs")
 args.add_to_registry("datasets_args")(DatasetArgs)
 
-DataloaderArgs = dataloaders_args.make_dataclass_from_args("DataloaderArgs")
+DataloaderArgs = dataloaders.make_dataclass_from_args("DataloaderArgs")
 args.add_to_registry("dataloaders_args")(DataloaderArgs)
 
-GensArgs = gens_args.make_dataclass_from_args("GensArgs")
+GensArgs = generators.make_dataclass_from_args("GensArgs")
 args.add_to_registry("gens_args")(GensArgs)
 
-DiscsArgs = discs_args.make_dataclass_from_args("DiscsArgs")
+DiscsArgs = discriminators.make_dataclass_from_args("DiscsArgs")
 args.add_to_registry("discs_args")(DiscsArgs)
 
-OptimGenArgs = optim_gen_args.make_dataclass_from_args("OptimGenArgs")
+OptimGenArgs = optimizers.make_dataclass_from_args("OptimGenArgs")
 args.add_to_registry("optim_gen_args")(OptimGenArgs)
 
-OptimDiscArgs = optim_disc_args.make_dataclass_from_args("OptimDiscArgs")
+OptimDiscArgs = optimizers.make_dataclass_from_args("OptimDiscArgs")
 args.add_to_registry("optim_disc_args")(OptimDiscArgs)
 
-LossesArchArgs = losses_arch_args.make_dataclass_from_args("LossesArchArgs")
+LossesArchArgs = losses_arch.make_dataclass_from_args("LossesArchArgs")
 args.add_to_registry("losses_arch_args")(LossesArchArgs)
 
-AugpipeArgs = augpipe_specs.make_dataclass_from_args("AugpipeArgs")
+AugpipeArgs = augmentations.make_dataclass_from_args("AugpipeArgs")
 args.add_to_registry("augpipe_specs")(AugpipeArgs)
 
-GenRegsArgs = gen_regs_args.make_dataclass_from_args("GenRegsArgs")
+GenRegsArgs = generator_regs.make_dataclass_from_args("GenRegsArgs")
 args.add_to_registry("gen_regs_all")(GenRegsArgs)
 
-DiscRegsArgs = disc_regs_args.make_dataclass_from_args("DiscRegsArgs")
+DiscRegsArgs = discriminator_regs.make_dataclass_from_args("DiscRegsArgs")
 args.add_to_registry("disc_regs_all")(DiscRegsArgs)
 
 

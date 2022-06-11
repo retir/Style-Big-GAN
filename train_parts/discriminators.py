@@ -26,6 +26,7 @@ from biggan.layers import Attention
 #----------------------------------------------------------------------------
 
 discriminators = utils.ClassRegistry()
+activations = {'relu': torch.nn.ReLU(inplace=False),}
 
 #----------------------------------------------------------------------------
 
@@ -83,7 +84,7 @@ class Conv2dLayer(torch.nn.Module):
         activation      = 'linear',     # Activation function: 'relu', 'lrelu', etc.
         up              = 1,            # Integer upsampling factor.
         down            = 1,            # Integer downsampling factor.
-        resample_filter = [1,3,3,1],    # Low-pass filter to apply when resampling activations.
+        resample_filter = (1,3,3,1),    # Low-pass filter to apply when resampling activations.
         conv_clamp      = None,         # Clamp the output to +-X, None = disable clamping.
         channels_last   = False,        # Expect the input to have memory_format=channels_last?
         trainable       = True,         # Update the weights of this layer during training?
@@ -124,13 +125,12 @@ class Conv2dLayer(torch.nn.Module):
 
 #----------------------------------------------------------------------------
 
-@persistence.persistent_class
 class MappingNetwork(torch.nn.Module):
     def __init__(self,
-        z_dim,                      # Input latent (Z) dimensionality, 0 = no latent.
-        c_dim,                      # Conditioning label (C) dimensionality, 0 = no label.
-        w_dim,                      # Intermediate latent (W) dimensionality.
-        num_ws,                     # Number of intermediate latents to output, None = do not broadcast.
+        z_dim           = None,     # Input latent (Z) dimensionality, 0 = no latent.
+        c_dim           = None,     # Conditioning label (C) dimensionality, 0 = no label.
+        w_dim           = None,     # Intermediate latent (W) dimensionality.
+        num_ws          = None,     # Number of intermediate latents to output, None = do not broadcast.
         num_layers      = 8,        # Number of mapping layers.
         embed_features  = None,     # Label embedding dimensionality, None = same as w_dim.
         layer_features  = None,     # Number of intermediate features in the mapping layers, None = same as w_dim.
@@ -138,6 +138,10 @@ class MappingNetwork(torch.nn.Module):
         lr_multiplier   = 0.01,     # Learning rate multiplier for the mapping layers.
         w_avg_beta      = 0.995,    # Decay for tracking the moving average of W during training, None = do not track.
     ):
+        assert z_dim is not None
+        assert c_dim is not None
+        assert w_dim is not None
+        assert num_ws is not None
         super().__init__()
         self.z_dim = z_dim
         self.c_dim = c_dim
@@ -204,24 +208,29 @@ class MappingNetwork(torch.nn.Module):
 
 #----------------------------------------------------------------------------
 
-@persistence.persistent_class
 class DiscriminatorBlock(torch.nn.Module):
     def __init__(self,
-        in_channels,                        # Number of input channels, 0 = first block.
-        tmp_channels,                       # Number of intermediate channels.
-        out_channels,                       # Number of output channels.
-        resolution,                         # Resolution of this block.
-        img_channels,                       # Number of input color channels.
-        first_layer_idx,                    # Index of the first layer.
+        in_channels         = None,                        # Number of input channels, 0 = first block.
+        tmp_channels        = None,                       # Number of intermediate channels.
+        out_channels        = None,                       # Number of output channels.
+        resolution          = None,                         # Resolution of this block.
+        img_channels        = None,                       # Number of input color channels.
+        first_layer_idx     = None,                    # Index of the first layer.
         architecture        = 'resnet',     # Architecture: 'orig', 'skip', 'resnet'.
         attention           = False,
         activation          = 'lrelu',      # Activation function: 'relu', 'lrelu', etc.
-        resample_filter     = [1,3,3,1],    # Low-pass filter to apply when resampling activations.
+        resample_filter     = (1,3,3,1),    # Low-pass filter to apply when resampling activations.
         conv_clamp          = None,         # Clamp the output of convolution layers to +-X, None = disable clamping.
         use_fp16            = False,        # Use FP16 for this block?
         fp16_channels_last  = False,        # Use channels-last memory format with FP16?
         freeze_layers       = 0,            # Freeze-D: Number of layers to freeze.
     ):
+        assert in_channels is not None
+        assert tmp_channels is not None
+        assert out_channels is not None
+        assert resolution is not None
+        assert img_channels is not None
+        assert first_layer_idx is not None
         assert in_channels in [0, tmp_channels]
         assert architecture in ['orig', 'skip', 'resnet']
         super().__init__()
@@ -249,9 +258,6 @@ class DiscriminatorBlock(torch.nn.Module):
                 trainable=next(trainable_iter), conv_clamp=conv_clamp, channels_last=self.channels_last)
 
         self.conv0 = Conv2dLayer(tmp_channels, tmp_channels, kernel_size=3, activation=activation,
-            trainable=next(trainable_iter), conv_clamp=conv_clamp, channels_last=self.channels_last)
-
-        self.conv0_5 = Conv2dLayer(tmp_channels, tmp_channels, kernel_size=3, activation=activation,  # DEL
             trainable=next(trainable_iter), conv_clamp=conv_clamp, channels_last=self.channels_last)
 
         self.conv1 = Conv2dLayer(tmp_channels, out_channels, kernel_size=3, activation=activation, down=2,
@@ -282,12 +288,10 @@ class DiscriminatorBlock(torch.nn.Module):
         if self.architecture == 'resnet':
             y = self.skip(x, gain=np.sqrt(0.5))
             x = self.conv0(x)
-            x = self.conv0_5(x)                    # DEL
             x = self.conv1(x, gain=np.sqrt(0.5))
             x = y.add_(x)
         else:
             x = self.conv0(x)
-            x = self.conv0_5(x)                    # DEL
             x = self.conv1(x)
 
         if self.attention:
@@ -325,19 +329,22 @@ class MinibatchStdLayer(torch.nn.Module):
 
 #----------------------------------------------------------------------------
 
-@persistence.persistent_class
 class DiscriminatorEpilogue(torch.nn.Module):
     def __init__(self,
-        in_channels,                    # Number of input channels.
-        cmap_dim,                       # Dimensionality of mapped conditioning label, 0 = no label.
-        resolution,                     # Resolution of this block.
-        img_channels,                   # Number of input color channels.
+        in_channels         = None,     # Number of input channels.
+        cmap_dim            = None,     # Dimensionality of mapped conditioning label, 0 = no label.
+        resolution          = None,     # Resolution of this block.
+        img_channels        = None,     # Number of input color channels.
         architecture        = 'resnet', # Architecture: 'orig', 'skip', 'resnet'.
         mbstd_group_size    = 4,        # Group size for the minibatch standard deviation layer, None = entire minibatch.
         mbstd_num_channels  = 1,        # Number of features for the minibatch standard deviation layer, 0 = disable.
         activation          = 'lrelu',  # Activation function: 'relu', 'lrelu', etc.
         conv_clamp          = None,     # Clamp the output of convolution layers to +-X, None = disable clamping.
     ):
+        assert in_channels is not None
+        assert cmap_dim is not None
+        assert resolution is not None
+        assert img_channels is not None
         assert architecture in ['orig', 'skip', 'resnet']
         super().__init__()
         self.in_channels = in_channels
@@ -383,24 +390,35 @@ class DiscriminatorEpilogue(torch.nn.Module):
 
 #----------------------------------------------------------------------------
 
+Mappingkwargs = discriminators.make_dataclass_from_init(MappingNetwork.__init__, 'Mappingkwargs', None)
+Discblockkwargs = discriminators.make_dataclass_from_init(DiscriminatorBlock.__init__, 'Discblockkwargs', None)
+Discepilogkwargs = discriminators.make_dataclass_from_init(DiscriminatorEpilogue.__init__, 'Discepilogkwargs', None)
+
+MappingNetwork = persistence.persistent_class(MappingNetwork)
+DiscriminatorBlock = persistence.persistent_class(DiscriminatorBlock)
+DiscriminatorEpilogue = persistence.persistent_class(DiscriminatorEpilogue)
+
+#@persistence.persistent_class
 @discriminators.add_to_registry("sg2_classic")
-@persistence.persistent_class
 class Discriminator(torch.nn.Module):
     def __init__(self,
-        c_dim,                          # Conditioning label (C) dimensionality.
-        img_resolution,                 # Input resolution.
-        img_channels,                   # Number of input color channels.
-        attentions          = [],
+        c_dim               = None,     # Conditioning label (C) dimensionality.
+        img_resolution      = None,     # Input resolution.
+        img_channels        = None,     # Number of input color channels.
+        attentions          = (),
         architecture        = 'resnet', # Architecture: 'orig', 'skip', 'resnet'.
         channel_base        = 32768,    # Overall multiplier for the number of channels.
         channel_max         = 512,      # Maximum number of channels in any layer.
         num_fp16_res        = 0,        # Use FP16 for the N highest resolutions.
         conv_clamp          = None,     # Clamp the output of convolution layers to +-X, None = disable clamping.
         cmap_dim            = None,     # Dimensionality of mapped conditioning label, None = default.
-        block_kwargs        = {},       # Arguments for DiscriminatorBlock.
-        mapping_kwargs      = {},       # Arguments for MappingNetwork.
-        epilogue_kwargs     = {},       # Arguments for DiscriminatorEpilogue.
+        block_kwargs        = Discblockkwargs(),       # Arguments for DiscriminatorBlock.
+        mapping_kwargs      = Mappingkwargs(),       # Arguments for MappingNetwork.
+        epilogue_kwargs     = Discepilogkwargs(),       # Arguments for DiscriminatorEpilogue.
     ):
+        # assert c_dim is not None
+        assert img_resolution is not None
+        assert img_channels is not None
         super().__init__()
         self.c_dim = c_dim
         self.img_resolution = img_resolution
@@ -422,13 +440,18 @@ class Discriminator(torch.nn.Module):
             tmp_channels = channels_dict[res]
             out_channels = channels_dict[res // 2]
             use_fp16 = (res >= fp16_resolution)
-            block = DiscriminatorBlock(in_channels, tmp_channels, out_channels, resolution=res,
-                first_layer_idx=cur_layer_idx, use_fp16=use_fp16, attention=res in attentions, **block_kwargs, **common_kwargs)
+            block_kwargs.update({'in_channels': in_channels, 'tmp_channels': tmp_channels, 'out_channels': out_channels, 'resolution': res,
+                'first_layer_idx': cur_layer_idx, 'use_fp16': use_fp16, 'attention': res in attentions})
+            block_kwargs.update(common_kwargs)   
+            block = DiscriminatorBlock(**block_kwargs)
             setattr(self, f'b{res}', block)
             cur_layer_idx += block.num_layers
         if c_dim > 0:
-            self.mapping = MappingNetwork(z_dim=0, c_dim=c_dim, w_dim=cmap_dim, num_ws=None, w_avg_beta=None, **mapping_kwargs)
-        self.b4 = DiscriminatorEpilogue(channels_dict[4], cmap_dim=cmap_dim, resolution=4, **epilogue_kwargs, **common_kwargs)
+            mapping_kwargs.update({'z_dim': 0, 'c_dim': c_dim, 'w_dim': cmap_dim, 'num_ws': None, 'w_avg_beta': None})
+            self.mapping = MappingNetwork(**mapping_kwargs)
+        epilogue_kwargs.update({'in_channels': channels_dict[4], 'cmap_dim': cmap_dim, 'resolution': 4})
+        epilogue_kwargs.update(common_kwargs)
+        self.b4 = DiscriminatorEpilogue(**epilogue_kwargs)
 
     def forward(self, img, c, **block_kwargs):
         x = None
@@ -711,7 +734,7 @@ class BigGanDiscriminator(torch.nn.Module):
 
   def __init__(self, z_dim=128, c_dim=10, D_ch=64, D_wide=True, img_resolution=128,
                D_kernel_size=3, D_attn='64', n_classes=10,
-               num_D_SVs=1, num_D_SV_itrs=1, D_activation=torch.nn.ReLU(inplace=False),
+               num_D_SVs=1, num_D_SV_itrs=1, D_activation='relu',
                SN_eps=1e-12, output_dim=1, D_mixed_precision=False, D_fp16=False,
                D_init='ortho', D_param='SN', **kwargs):
     super(BigGanDiscriminator, self).__init__()
@@ -730,7 +753,7 @@ class BigGanDiscriminator(torch.nn.Module):
     # Number of classes
     self.n_classes = n_classes
     # Activation
-    self.activation = D_activation
+    self.activation = activations[D_activation]
     # Initialization style
     self.init = D_init
     # Parameterization style

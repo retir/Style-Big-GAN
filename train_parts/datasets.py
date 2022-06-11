@@ -159,10 +159,18 @@ class Dataset(torch.utils.data.Dataset):
 @datasets.add_to_registry("image_folder")
 class ImageFolderDataset(Dataset):
     def __init__(self,
-        path,                   # Path to directory or zip.
-        resolution      = None, # Ensure specific resolution, None = highest available.
-        **super_kwargs,         # Additional arguments for the Dataset base class.
+        path        = '',                   # Path to directory or zip.
+        resolution  = None, # Ensure specific resolution, None = highest available.
+        use_labels  = False,
+        max_size    = None,
+        xflip       = False,
+        random_seed = 0,         # Additional arguments for the Dataset base class.
     ):
+        super_kwargs = {}
+        super_kwargs['use_labels'] = use_labels
+        super_kwargs['max_size'] = max_size
+        super_kwargs['xflip'] = xflip
+        super_kwargs['random_seed'] = random_seed
         self._path = path
         self._zipfile = None
 

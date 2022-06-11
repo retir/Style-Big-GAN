@@ -39,7 +39,8 @@ from train_parts.augmentations import augmentations
 from train_parts.losses import losses
 from train_parts.losses_base import losses_arch
 from train_parts.optimizers import optimizers
-from train_parts_args.augmentaions_agrs import augpipe_specs
+#from train_parts_args.augmentaions_agrs import augpipe_specs
+from train_parts.dataloaders import dataloaders
 from dataclasses import asdict
 from collections import defaultdict
 
@@ -226,8 +227,8 @@ class BaseTrainer:
         # -----------------------------------
         # Dataset options
         # -----------------------------------
-
-        args.training_set_kwargs = dnnlib.EasyDict(path=config.data.dataset_path, **config.datasets_args[config.data.dataset])
+        args.training_set_kwargs = dnnlib.EasyDict(**config.datasets_args[config.data.dataset])
+        args.training_set_kwargs['path'] = config.data.dataset_path
         args.data_loader_kwargs = dnnlib.EasyDict(**config.dataloaders_args[config.data.dataloader])
 
         try:
@@ -331,7 +332,7 @@ class BaseTrainer:
         
         args.augment_kwargs = None
         if config.aug.aug != 'noaug':
-            args.augment_kwargs = dnnlib.EasyDict(**asdict(augpipe_specs[config.aug.augpipe]()))
+            args.augment_kwargs = dnnlib.EasyDict(**asdict(config.augpipe_specs[config.aug.augpipe]()))
 
 
         # ----------------------------------
@@ -520,7 +521,7 @@ class BaseTrainer:
         self.training_set = datasets[self.args.names.dataset](**self.args.training_set_kwargs)
         
         self.training_set_sampler = misc.InfiniteSampler(dataset=self.training_set, rank=self.rank, num_replicas=self.args.num_gpus, seed=self.args.random_seed)
-        self.training_set_iterator = iter(torch.utils.data.DataLoader(dataset=self.training_set, sampler=self.training_set_sampler, batch_size=self.args.batch_size//self.args.num_gpus, **self.args.data_loader_kwargs))
+        self.training_set_iterator = iter(dataloaders[self.args.names.dataloader](dataset=self.training_set, sampler=self.training_set_sampler, batch_size=self.args.batch_size//self.args.num_gpus, **self.args.data_loader_kwargs))
         if self.rank == 0:
             print()
             print('Num images: ', len(self.training_set))
@@ -534,8 +535,10 @@ class BaseTrainer:
             print('Constructing networks...')
 
         common_kwargs = dict(c_dim=self.training_set.label_dim, img_resolution=self.training_set.resolution, img_channels=self.training_set.num_channels)
-        self.G = generators[self.args.names.generator](**self.args.G_kwargs, **common_kwargs).train().requires_grad_(False).to(self.device)
-        self.D = discriminators[self.args.names.discriminator](**self.args.D_kwargs, **common_kwargs).train().requires_grad_(False).to(self.device)
+        self.args.G_kwargs.update(common_kwargs)
+        self.args.D_kwargs.update(common_kwargs)
+        self.G = generators[self.args.names.generator](**self.args.G_kwargs).train().requires_grad_(False).to(self.device)
+        self.D = discriminators[self.args.names.discriminator](**self.args.D_kwargs).train().requires_grad_(False).to(self.device)
         self.G_ema = None
         if self.args.use_ema:
             self.G_ema = copy.deepcopy(self.G).eval()
@@ -598,12 +601,10 @@ class BaseTrainer:
     def setup_training_phases(self):
         if self.rank == 0:
             print('Setting up training phases...')
-        self.loss = losses_arch[self.args.names.loss_arch](device=self.device,
-                                                       loss=self.args.names.loss,
-                                                       gen_regs = self.args.gen_regs,
-                                                       dis_regs = self.args.dis_regs,
-                                                       **self.ddp_modules,
-                                                       **self.args.loss_kwargs)
+        loss_args = {'device': self.device, 'loss': self.args.names.loss, 'gen_regs': self.args.gen_regs, 'dis_regs': self.args.dis_regs}
+        loss_args.update(**self.args.loss_kwargs)
+        loss_args.update(**self.ddp_modules)
+        self.loss = losses_arch[self.args.names.loss_arch](**loss_args)
 
         intervals = defaultdict(lambda:1)
         intervals['G'] = self.args.n_dis         
@@ -612,14 +613,16 @@ class BaseTrainer:
         for name, module, opt_kwargs, reg_interval, opt_name in [('G', self.G, self.args.G_opt_kwargs, self.args.G_reg_interval, self.args.names.optim_gen), 
                                                                  ('D', self.D, self.args.D_opt_kwargs, self.args.D_reg_interval, self.args.names.optim_disc)]:
             if reg_interval <= 0:
-                self.opt = optimizers[opt_name](params=module.parameters(), **opt_kwargs)
+                opt_kwargs.update({'params': module.parameters()})
+                self.opt = optimizers[opt_name](**opt_kwargs)
                 self.phases += [dnnlib.EasyDict(name=name+'both', module=module, opt=self.opt, interval=intervals[name])]
             else: # Lazy regularization.
                 mb_ratio = reg_interval / (reg_interval + 1)
                 opt_kwargs = dnnlib.EasyDict(opt_kwargs)
                 opt_kwargs.lr = opt_kwargs.lr * mb_ratio
                 opt_kwargs.betas = [beta ** mb_ratio for beta in opt_kwargs.betas]
-                self.opt = optimizers[opt_name](params=module.parameters(), **opt_kwargs)
+                opt_kwargs.update({'params': module.parameters()})
+                self.opt = optimizers[opt_name](**opt_kwargs)
                 self.phases += [dnnlib.EasyDict(name=name+'main', module=module, opt=self.opt, interval=1)]
                 self.phases += [dnnlib.EasyDict(name=name+'reg', module=module, opt=self.opt, interval=reg_interval)]
         for phase in self.phases:

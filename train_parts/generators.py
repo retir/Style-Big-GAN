@@ -21,10 +21,12 @@ from stylegan2ada.torch_utils.ops import upfirdn2d
 from stylegan2ada.torch_utils.ops import bias_act
 from stylegan2ada.torch_utils.ops import fma
 from biggan.layers import Attention
+from dataclasses import dataclass, asdict
 
 #----------------------------------------------------------------------------
 
 generators = utils.ClassRegistry()
+activations = {'relu': torch.nn.ReLU(inplace=False),}
 
 #----------------------------------------------------------------------------
 
@@ -184,13 +186,13 @@ class Conv2dLayer(torch.nn.Module):
 
 #----------------------------------------------------------------------------
 
-@persistence.persistent_class
+#@persistence.persistent_class
 class MappingNetwork(torch.nn.Module):
     def __init__(self,
-        z_dim,                      # Input latent (Z) dimensionality, 0 = no latent.
-        c_dim,                      # Conditioning label (C) dimensionality, 0 = no label.
-        w_dim,                      # Intermediate latent (W) dimensionality.
-        num_ws,                     # Number of intermediate latents to output, None = do not broadcast.
+        z_dim           = None,     # Input latent (Z) dimensionality, 0 = no latent.
+        c_dim           = None,     # Conditioning label (C) dimensionality, 0 = no label.
+        w_dim           = None,     # Intermediate latent (W) dimensionality.
+        num_ws          = None,     # Number of intermediate latents to output, None = do not broadcast.
         num_layers      = 8,        # Number of mapping layers.
         embed_features  = None,     # Label embedding dimensionality, None = same as w_dim.
         layer_features  = None,     # Number of intermediate features in the mapping layers, None = same as w_dim.
@@ -198,6 +200,10 @@ class MappingNetwork(torch.nn.Module):
         lr_multiplier   = 0.01,     # Learning rate multiplier for the mapping layers.
         w_avg_beta      = 0.995,    # Decay for tracking the moving average of W during training, None = do not track.
     ):
+        assert z_dim is not None
+        assert c_dim is not None
+        assert w_dim is not None
+        assert num_ws is not None
         super().__init__()
         self.z_dim = z_dim
         self.c_dim = c_dim
@@ -264,21 +270,25 @@ class MappingNetwork(torch.nn.Module):
 
 #----------------------------------------------------------------------------
 
-@persistence.persistent_class
 class SynthesisLayer(torch.nn.Module):
     def __init__(self,
-        in_channels,                    # Number of input channels.
-        out_channels,                   # Number of output channels.
-        w_dim,                          # Intermediate latent (W) dimensionality.
-        resolution,                     # Resolution of this layer.
+        in_channels     = None,         # Number of input channels.
+        out_channels    = None,         # Number of output channels.
+        w_dim           = None,         # Intermediate latent (W) dimensionality.
+        resolution      = None,         # Resolution of this layer.
         kernel_size     = 3,            # Convolution kernel size.
         up              = 1,            # Integer upsampling factor.
         use_noise       = True,         # Enable noise input?
         activation      = 'lrelu',      # Activation function: 'relu', 'lrelu', etc.
-        resample_filter = [1,3,3,1],    # Low-pass filter to apply when resampling activations.
+        resample_filter = (1,3,3,1),    # Low-pass filter to apply when resampling activations.
         conv_clamp      = None,         # Clamp the output of convolution layers to +-X, None = disable clamping.
         channels_last   = False,        # Use channels_last format for the weights?
     ):
+        assert in_channels is not None
+        assert out_channels is not None
+        assert w_dim is not None
+        assert resolution is not None
+        
         super().__init__()
         self.resolution = resolution
         self.up = up
@@ -339,23 +349,30 @@ class ToRGBLayer(torch.nn.Module):
 
 #----------------------------------------------------------------------------
 
-@persistence.persistent_class
+Synthlayerkwargs = generators.make_dataclass_from_init(SynthesisLayer.__init__, 'Synthlayerkwargs', None)
+
 class SynthesisBlock(torch.nn.Module):
     def __init__(self,
-        in_channels,                        # Number of input channels, 0 = first block.
-        out_channels,                       # Number of output channels.
-        w_dim,                              # Intermediate latent (W) dimensionality.
-        resolution,                         # Resolution of this block.
-        img_channels,                       # Number of output color channels.
-        is_last,                            # Is this the last block?
+        in_channels         = None,         # Number of input channels, 0 = first block.
+        out_channels        = None,         # Number of output channels.
+        w_dim               = None,         # Intermediate latent (W) dimensionality.
+        resolution          = None,         # Resolution of this block.
+        img_channels        = None,         # Number of output color channels.
+        is_last             = None,         # Is this the last block?
         architecture        = 'skip',       # Architecture: 'orig', 'skip', 'resnet'.
-        resample_filter     = [1,3,3,1],    # Low-pass filter to apply when resampling activations.
+        resample_filter     = (1,3,3,1),    # Low-pass filter to apply when resampling activations.
         conv_clamp          = None,         # Clamp the output of convolution layers to +-X, None = disable clamping.
         use_fp16            = False,        # Use FP16 for this block?
         fp16_channels_last  = False,        # Use channels-last memory format with FP16?
         attention           = False,        # Use attention in the end of the block
-        **layer_kwargs,                     # Arguments for SynthesisLayer.
+        layer_kwargs        = Synthlayerkwargs(),                     # Arguments for SynthesisLayer.
     ):
+        assert in_channels is not None
+        assert out_channels is not None
+        assert w_dim is not None
+        assert resolution is not None
+        assert img_channels is not None
+        assert is_last is not None
         assert architecture in ['orig', 'skip', 'resnet']
         super().__init__()
         self.in_channels = in_channels
@@ -375,17 +392,14 @@ class SynthesisBlock(torch.nn.Module):
         if in_channels == 0:
             self.const = torch.nn.Parameter(torch.randn([out_channels, resolution, resolution]))
 
+        layer_kwargs.update({'in_channels': in_channels, 'out_channels': out_channels, 'w_dim': w_dim, 'resolution': resolution, 'up': 2,
+                'resample_filter': resample_filter, 'conv_clamp': conv_clamp, 'channels_last': self.channels_last})
         if in_channels != 0:
-            self.conv0 = SynthesisLayer(in_channels, out_channels, w_dim=w_dim, resolution=resolution, up=2,
-                resample_filter=resample_filter, conv_clamp=conv_clamp, channels_last=self.channels_last, **layer_kwargs)
+            self.conv0 = SynthesisLayer(**layer_kwargs)
             self.num_conv += 1
 
-        #self.conv0_5 = SynthesisLayer(out_channels, out_channels, w_dim=w_dim, resolution=resolution, # DEL
-        #    conv_clamp=conv_clamp, channels_last=self.channels_last, **layer_kwargs)
-        #self.num_conv += 1
-        
-        self.conv1 = SynthesisLayer(out_channels, out_channels, w_dim=w_dim, resolution=resolution,
-            conv_clamp=conv_clamp, channels_last=self.channels_last, **layer_kwargs)
+        layer_kwargs.update({'in_channels': out_channels, 'up': 1, 'resample_filter': [1,3,3,1]})
+        self.conv1 = SynthesisLayer(**layer_kwargs)
         self.num_conv += 1
 
         if is_last or architecture == 'skip':
@@ -416,17 +430,14 @@ class SynthesisBlock(torch.nn.Module):
 
         # Main layers.
         if self.in_channels == 0:
-            #x = self.conv0_5(x, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs) # DEL
             x = self.conv1(x, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs)
         elif self.architecture == 'resnet':
             y = self.skip(x, gain=np.sqrt(0.5))
             x = self.conv0(x, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs)
-            #x = self.conv0_5(x, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs) # DEL
             x = self.conv1(x, next(w_iter), fused_modconv=fused_modconv, gain=np.sqrt(0.5), **layer_kwargs)
             x = y.add_(x)
         else:
             x = self.conv0(x, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs)
-            #x = self.conv0_5(x, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs) # DEL
             x = self.conv1(x, next(w_iter), fused_modconv=fused_modconv, **layer_kwargs)
 
         if self.attention:
@@ -448,18 +459,23 @@ class SynthesisBlock(torch.nn.Module):
 
 #----------------------------------------------------------------------------
 
-@persistence.persistent_class
+Synthblockkwargs = generators.make_dataclass_from_init(SynthesisBlock.__init__, 'Synthblockkwargs', None)
+
 class SynthesisNetwork(torch.nn.Module):
     def __init__(self,
-        w_dim,                      # Intermediate latent (W) dimensionality.
-        img_resolution,             # Output image resolution.
-        img_channels,               # Number of color channels.
+        w_dim           = None,     # Intermediate latent (W) dimensionality.
+        img_resolution  = None,     # Output image resolution.
+        img_channels    = None,     # Number of color channels.
         channel_base    = 32768,    # Overall multiplier for the number of channels.
         channel_max     = 512,      # Maximum number of channels in any layer.
         num_fp16_res    = 0,        # Use FP16 for the N highest resolutions.
-        attentions      = [],
-        **block_kwargs,             # Arguments for SynthesisBlock.
+        attentions      = (),
+        block_kwargs    = Synthblockkwargs(),             # Arguments for SynthesisBlock.
     ):
+    
+        assert w_dim is not None
+        assert img_resolution is not None
+        assert img_channels is not None
         assert img_resolution >= 4 and img_resolution & (img_resolution - 1) == 0
         super().__init__()
         self.w_dim = w_dim
@@ -476,8 +492,9 @@ class SynthesisNetwork(torch.nn.Module):
             out_channels = channels_dict[res]
             use_fp16 = (res >= fp16_resolution)
             is_last = (res == self.img_resolution)
-            block = SynthesisBlock(in_channels, out_channels, w_dim=w_dim, resolution=res,
-                img_channels=img_channels, is_last=is_last, use_fp16=use_fp16, attention=res in attentions, **block_kwargs)
+            block_kwargs.update({'in_channels': in_channels, 'out_channels': out_channels, 'w_dim': w_dim, 'resolution': res,
+            'img_channels': img_channels, 'is_last': is_last, 'use_fp16': use_fp16, 'attention': res in attentions})
+            block = SynthesisBlock(**block_kwargs)
             self.num_ws += block.num_conv
             if is_last:
                 self.num_ws += block.num_torgb
@@ -503,18 +520,27 @@ class SynthesisNetwork(torch.nn.Module):
 
 #----------------------------------------------------------------------------
 
+Mappingkwargs = generators.make_dataclass_from_init(MappingNetwork.__init__, 'Mappingkwargs', None)
+Synthesiskwargs = generators.make_dataclass_from_init(SynthesisNetwork.__init__, 'Synthesiskwargs', None)
+
+MappingNetwork = persistence.persistent_class(MappingNetwork)
+SynthesisNetwork = persistence.persistent_class(SynthesisNetwork)
+SynthesisBlock = persistence.persistent_class(SynthesisBlock)
+SynthesisLayer = persistence.persistent_class(SynthesisLayer)
+
+
+#@persistence.persistent_class
 @generators.add_to_registry("sg2_classic")
-@persistence.persistent_class
 class Generator(torch.nn.Module):
     def __init__(self,
-        z_dim,                      # Input latent (Z) dimensionality.
-        c_dim,                      # Conditioning label (C) dimensionality.
-        w_dim,                      # Intermediate latent (W) dimensionality.
-        img_resolution,             # Output resolution.
-        img_channels,               # Number of output color channels.
-        attentions          = [],
-        mapping_kwargs      = {},   # Arguments for MappingNetwork.
-        synthesis_kwargs    = {},   # Arguments for SynthesisNetwork.
+        z_dim               = 128,  # Input latent (Z) dimensionality.
+        c_dim               = None, # Conditioning label (C) dimensionality.
+        w_dim               = 128,  # Intermediate latent (W) dimensionality.
+        img_resolution      = None, # Output resolution.
+        img_channels        = None, # Number of output color channels.
+        attentions          = (),
+        mapping_kwargs      = Mappingkwargs(),   # Arguments for MappingNetwork.
+        synthesis_kwargs    = Synthesiskwargs(),   # Arguments for SynthesisNetwork.
     ):
         super().__init__()
         self.z_dim = z_dim
@@ -522,14 +548,20 @@ class Generator(torch.nn.Module):
         self.w_dim = w_dim
         self.img_resolution = img_resolution
         self.img_channels = img_channels
-        self.synthesis = SynthesisNetwork(w_dim=w_dim, img_resolution=img_resolution, img_channels=img_channels, attentions=attentions,**synthesis_kwargs)
+        synthesis_kwargs.update({'w_dim':w_dim, 'img_resolution':img_resolution, 'img_channels':img_channels, 'attentions':attentions})
+        self.synthesis = SynthesisNetwork(**synthesis_kwargs) # **synthesis_kwargs
         self.num_ws = self.synthesis.num_ws
-        self.mapping = MappingNetwork(z_dim=z_dim, c_dim=c_dim, w_dim=w_dim, num_ws=self.num_ws, **mapping_kwargs)
+        mapping_kwargs.z_dim = z_dim
+        mapping_kwargs.c_dim = c_dim
+        mapping_kwargs.w_dim = w_dim
+        mapping_kwargs.num_ws = self.num_ws
+        self.mapping = MappingNetwork(**mapping_kwargs)
 
     def forward(self, z, c, truncation_psi=1, truncation_cutoff=None, **synthesis_kwargs):
         ws = self.mapping(z, c, truncation_psi=truncation_psi, truncation_cutoff=truncation_cutoff)
         img = self.synthesis(ws, **synthesis_kwargs)
         return img
+        
 
 # DCGAN
 #----------------------------------------------------------------------------
@@ -728,7 +760,7 @@ class BigGAnGenerator(torch.nn.Module):
                num_G_SVs=1, num_G_SV_itrs=1,
                G_shared=True, shared_dim=0, hier=False,
                cross_replica=False, mybn=False,
-               G_activation=torch.nn.ReLU(inplace=False),
+               G_activation='relu',
                BN_eps=1e-5, SN_eps=1e-12, G_mixed_precision=False, G_fp16=False,
                G_init='ortho',
                G_param='SN', norm_style='bn',
@@ -760,7 +792,7 @@ class BigGAnGenerator(torch.nn.Module):
         # Use my batchnorm?
         self.mybn = mybn
         # nonlinearity for residual blocks
-        self.activation = G_activation
+        self.activation = activations[G_activation]
         # Initialization style
         self.init = G_init
         # Parameterization style

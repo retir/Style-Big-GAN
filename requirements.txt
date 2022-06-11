@@ -1,7 +1,8 @@
-absl-py
-pytorch_gan_metrics
+torch==1.7.1
+torchvision==0.8.2
+omegaconf==2.1.2
+ninja
+wandb
 scipy
-tensorflow
-tensorboardX
-tqdm
+
 

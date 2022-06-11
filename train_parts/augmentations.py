@@ -116,14 +116,14 @@ def rotate2d_inv(theta, **kwargs):
 # All augmentations are disabled by default; individual augmentations can
 # be enabled by setting their probability multipliers to 1.
 
+#@persistence.persistent_class
 @augmentations.add_to_registry("sg2_ada")
-@persistence.persistent_class
 class AugmentPipe(torch.nn.Module):
     def __init__(self,
         xflip=0, rotate90=0, xint=0, xint_max=0.125,
         scale=0, rotate=0, aniso=0, xfrac=0, scale_std=0.2, rotate_max=1, aniso_std=0.2, xfrac_std=0.125,
         brightness=0, contrast=0, lumaflip=0, hue=0, saturation=0, brightness_std=0.2, contrast_std=0.5, hue_max=1, saturation_std=1,
-        imgfilter=0, imgfilter_bands=[1,1,1,1], imgfilter_std=1,
+        imgfilter=0, imgfilter_bands=(1,1,1,1), imgfilter_std=1,
         noise=0, cutout=0, noise_std=0.1, cutout_size=0.5,
     ):
         super().__init__()

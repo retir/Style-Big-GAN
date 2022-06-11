@@ -10,15 +10,15 @@ discriminator_regs = utils.ClassRegistry()
 
 @generator_regs.add_to_registry("ppl")
 class PPLreg:
-    def __init__(self, device, pl_batch_shrink, pl_decay, pl_weight):
-        self.device = device
+    def __init__(self, pl_batch_shrink=2., pl_decay=0.01, pl_weight=2.):
         self.pl_batch_shrink = pl_batch_shrink
         self.pl_decay = pl_decay
         self.pl_weight = pl_weight
-        self.pl_mean = torch.zeros([], device=device)
+        self.pl_mean = torch.zeros([])
         
     def calc_reg(self, model, real_img, real_c, gen_z, gen_c, sync, gain):
         if hasattr(model.G, 'G_mapping'):
+            self.pl_mean = self.pl_mean.to(model.device)
             with torch.autograd.profiler.record_function('Gpl_forward'):
                 if self.pl_weight != 0:
                     batch_size = gen_z.shape[0] // self.pl_batch_shrink
@@ -39,8 +39,7 @@ class PPLreg:
 
 @discriminator_regs.add_to_registry("r1")
 class R1reg:
-    def __init__(self, device, r1_gamma):
-        self.device = device
+    def __init__(self, r1_gamma=10.):
         self.r1_gamma = r1_gamma
         
     def calc_reg(self, model, real_img, real_c, gen_z, gen_c, real_logits, real_img_tmp, sync, gain):
@@ -59,12 +58,11 @@ class R1reg:
                 
 @discriminator_regs.add_to_registry("grad_pen")
 class Grad_pen:
-    def __init__(self, device, alpha):
-        self.device = device
+    def __init__(self, alpha=10.):
         self.alpha = alpha
     def calc_reg(self, model, real_img, real_c, gen_z, gen_c, real_logits, real_img_tmp, sync, gain):
         with torch.autograd.profiler.record_function('Dgrad_pen_forward'):
-            real = real_img.to(self.device)
+            real = real_img.to(model.device)
             with torch.no_grad():
                 fake = model.run_G(gen_z, gen_c, sync=False)
             t = torch.rand(real.size(0), 1, 1, 1).to(real.device)
@@ -85,3 +83,5 @@ class Grad_pen:
 
         with torch.autograd.profiler.record_function('Dgrad_pen_backward'):
             loss_gp.mean().mul(gain).backward()
+            
+            
